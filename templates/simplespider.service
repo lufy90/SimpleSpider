@@ -1,0 +1,17 @@
+[Unit]
+Description=SimpleSpider Gunicorn
+After=network.target
+
+[Service]
+User=lufei
+Group=lufei
+WorkingDirectory={{ PROJECT_ROOT }}/backend/
+ExecStart={{ VENV_ROOT }}/bin/gunicorn backend.wsgi:application \
+          --bind unix:{{ PROJECT_ROOT }}/backend/run/simplespider.sock \
+          --workers 4 \
+          --timeout 120
+RuntimeDirectoryMode=775
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

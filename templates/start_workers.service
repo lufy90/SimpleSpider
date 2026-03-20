@@ -1,0 +1,16 @@
+[Unit]
+Description=SimpleSpider Workers (start_workers)
+After=network.target
+
+[Service]
+User=lufei
+Group=lufei
+WorkingDirectory={{ PROJECT_ROOT }}/backend/
+ExecStart={{ VENV_ROOT }}/bin/python manage.py start_workers
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

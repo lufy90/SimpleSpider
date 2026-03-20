@@ -1,0 +1,21 @@
+Django==5.2.4
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+django-environ==0.12.0
+djangorestframework-simplejwt==5.3.0
+django-filter==24.3
+
+# Web scraping dependencies (from original FastAPI backend)
+aiofiles==24.1.0
+playwright==1.51.0
+requests==2.32.3
+Pillow==10.4.0
+onnxruntime>=1.16.0
+opencv-python-headless>=4.8.0
+
+# Database
+psycopg2-binary==2.9.9  # For PostgreSQL support (optional)
+
+# Development
+django-debug-toolbar==4.4.6
+django-extensions==3.2.3

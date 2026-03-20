@@ -1,0 +1,9 @@
+media
+staticfiles
+dydata
+*/cookies.json
+migrations
+*.log
+*.onnx
+*.pth
+*.pyc
