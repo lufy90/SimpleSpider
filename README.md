@@ -1,8 +1,8 @@
 # SimpleSpider（抖音内容爬取与管理）
 
-这是一个使用 Django REST Framework 和 VUE3 开发的抖音（TikTok）内容管理与抓取项目。系统包含：
+这是一个使用 Django REST Framework 和 VUE3 开发的抖音内容管理与抓取项目。系统包含：
 
-- 爬虫基于 playwright，可批量爬取喜欢/收藏视频，可批量爬取作者的所有视频
+- 爬虫基于 playwright，可批量爬取喜欢/收藏视频，可批量爬取多位作者的所有视频
 - 便捷的 UI 功能，通过前端 UI 下发任务，包含丰富的任务配置：爬取的请求数量、按过滤结果爬取等
 - 内容管理功能，管理爬取到的作者和视频 (前端基于 VUE3 和 element-plus)
 - 自动评分，可导出人工评分的数据并训练模型，再通过模型自动评分
@@ -13,7 +13,11 @@
 - `frontend/`：前端（Vue 3）
 - `templates/`：部署模板（systemd service、Nginx 配置等）
 
-## 快速开始（后端）
+## 快速开始
+
+爬虫，API，数据处理
+
+### 后端
 
 前提说明：
 
@@ -78,7 +82,29 @@ python manage.py runserver 0.0.0.0:8000
 - Django 管理后台：`http://localhost:8000/admin/`
 - API：`http://localhost:8000/api/`
 
-## 快速开始（前端，可选）
+### 前端
+
+内容管理、展示、任务下发、数据标记
+
+#### 界面预览
+
+以下为部分页面截图（资源位于 `docs/images/`）。
+
+**作者列表**
+
+![作者列表](docs/images/author_list_page.png)
+
+**作者详情**
+
+![作者详情](docs/images/author_detail_page.png)
+
+**视频列表**
+
+![视频列表](docs/images/video_list_page.png)
+
+**任务列表**
+
+![任务列表](docs/images/task_list_page.png)
 
 1. 构建静态资源
 
