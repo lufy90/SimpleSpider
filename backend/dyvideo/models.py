@@ -108,6 +108,7 @@ class Task(models.Model):
     task_type = models.CharField(max_length=50, choices=TaskType.choices)
     status = models.CharField(max_length=20, choices=TaskStatus.choices, default=TaskStatus.PENDING)
     priority = models.IntegerField(default=5, help_text="Higher number = higher priority")
+    is_rerun = models.BooleanField(default=False)
     
     # Task parameters (stored as JSON)
     parameters = models.JSONField(default=dict, help_text="Task parameters")

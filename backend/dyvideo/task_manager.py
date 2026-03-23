@@ -89,6 +89,9 @@ class TaskManager:
         """Execute crawl authors task"""
         params = task.parameters.copy()
         author_ids = params.pop('authors', [])
+
+        if task.is_rerun:
+            author_ids = DyAuthor.objects.filter(id__in=author_ids, status='waiting').values_list('id', flat=True)
         
         # Execute crawling (author_ids is passed as positional arg, params without authors as kwargs)
         # Status updates are handled inside crawl_authors_batch by batch

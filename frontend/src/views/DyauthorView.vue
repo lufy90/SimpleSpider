@@ -105,7 +105,7 @@
             <el-rate v-model="scope.row.rate" @change="changeRate(scope.row)" />
           </template>
         </el-table-column>
-        <el-table-column v-if="!isMobile" prop="status" :min-width="isMobile ? 110 : 100" show-overflow-tooltip>
+        <el-table-column v-if="!isMobile" prop="status" label="Status" :min-width="isMobile ? 110 : 100" show-overflow-tooltip>
           <template #default="scope">
             {{ statusOptions[scope.row.status] || scope.row.status }}
           </template>
