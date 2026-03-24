@@ -12,13 +12,29 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+# Optional Django settings reader with safe fallback.
+def _get_setting(name, default):
+    try:
+        from django.conf import settings as django_settings
+        return getattr(django_settings, name, default)
+    except Exception:
+        return default
+
+
 # ResNet/ImageNet standard normalization
-IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-INPUT_SIZE = (128, 128)
+IMAGENET_MEAN = np.array(
+    _get_setting("AUTO_RATE_IMAGENET_MEAN", [0.485, 0.456, 0.406]),
+    dtype=np.float32,
+)
+IMAGENET_STD = np.array(
+    _get_setting("AUTO_RATE_IMAGENET_STD", [0.229, 0.224, 0.225]),
+    dtype=np.float32,
+)
+INPUT_SIZE = tuple(_get_setting("AUTO_RATE_INPUT_SIZE", (128, 128)))
 
 # Default number of frames for precise rating
-DEFAULT_PRECISE_FRAME_COUNT = 3
+DEFAULT_PRECISE_FRAME_COUNT = int(_get_setting("AUTO_RATE_PRECISE_FRAME_COUNT", 3))
+DEFAULT_PRECISE_REDUCE = str(_get_setting("AUTO_RATE_PRECISE_REDUCE", "max")).strip().lower()
 
 
 def _load_onnx_session(model_path: str):
@@ -128,10 +144,12 @@ class OnnxRatePredictor:
             rates.append(rate)
         avg_val = sum(rates) / len(rates)
         max_val = max(rates)
-        #result = max(1, min(5, int(round(avg_val))))
-        result = max_val
+        if DEFAULT_PRECISE_REDUCE == "avg":
+            result = max(1, min(5, int(round(avg_val))))
+        else:
+            result = max_val
         if callable(on_precise_done):
-            on_precise_done(rates, max_val)
+            on_precise_done(rates, result)
         return result
 
     def close(self):

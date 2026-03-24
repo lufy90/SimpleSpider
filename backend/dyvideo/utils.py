@@ -261,7 +261,7 @@ def crawl_page(page, url, exp_resp_urls, **kwargs) -> List[Dict[str, Any]]:
     if page_count:
         page.get_by_text("抖音号").click()
         while res_count < page_count:
-            logger.info(f"crawl_page current res_count: ${res_count}")
+            logger.info(f"crawl_page current res_count: {res_count}")
             page.keyboard.press("End")
             page.wait_for_load_state('domcontentloaded', timeout=60000)
             page.wait_for_timeout(10000)

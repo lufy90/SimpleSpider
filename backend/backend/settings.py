@@ -202,7 +202,13 @@ TASK_WORKER_COUNT = 1  # Number of workers to auto-start for task processing
 #AUTO_RATE_ENABLED = os.environ.get('AUTO_RATE_ENABLED', 'false').lower() in ('true', '1', 'yes')
 #AUTO_RATE_MODEL_PATH = os.environ.get('AUTO_RATE_MODEL_PATH', BASE_DIR / 'auto_rate.onnx')  # Path to ONNX model file
 AUTO_RATE_ENABLED = True
-AUTO_RATE_MODEL_PATH = 'auto_rate.onnx'
+AUTO_RATE_MODEL_PATH = 'best.onnx'
+AUTO_RATE_INPUT_SIZE = (224, 224)
+AUTO_RATE_IMAGENET_MEAN = [0.485, 0.456, 0.406]
+AUTO_RATE_IMAGENET_STD = [0.229, 0.224, 0.225]
+AUTO_RATE_PRECISE_FRAME_COUNT = 3
+# Options: "max" or "avg"
+AUTO_RATE_PRECISE_REDUCE = "max"
 
 # Logging configuration
 LOGGING = {
