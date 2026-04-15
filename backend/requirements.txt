@@ -9,6 +9,7 @@ django-filter==24.3
 aiofiles==24.1.0
 playwright==1.51.0
 requests==2.32.3
+curl-cffi>=0.6.0
 Pillow==10.4.0
 onnxruntime>=1.16.0
 opencv-python-headless>=4.8.0
@@ -19,3 +20,10 @@ psycopg2-binary==2.9.9  # For PostgreSQL support (optional)
 # Development
 django-debug-toolbar==4.4.6
 django-extensions==3.2.3
+
+
+# for auto rate by custom model (optional)
+onnxruntime
+pillow
+numpy
+opencv-python-headless

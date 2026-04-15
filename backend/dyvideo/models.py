@@ -73,6 +73,7 @@ class DyVideo(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='updated_dyvideos', null=True, blank=True)
     size = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.WAITING)
     
     class Meta:
         db_table = 'dyvideo'
@@ -84,7 +85,9 @@ class DyVideo(models.Model):
     def save(self, *args, **kwargs):
         # Update valid status based on file existence
         play_src = os.path.join(settings.MEDIA_ROOT, self.path, "video.mp4")
-        self.valid = os.path.isfile(play_src) and os.path.getsize(play_src) > 0
+        if not self.valid:
+        # only update validity while it's not valid
+            self.valid = os.path.isfile(play_src) and os.path.getsize(play_src) > 0
         super().save(*args, **kwargs)
 
 

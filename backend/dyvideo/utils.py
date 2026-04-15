@@ -22,6 +22,98 @@ logger = logging.getLogger(__name__)
 cookie_file = settings.BASE_DIR / 'dyvideo' / 'cookies.json'
 DATADIR = settings.MEDIA_ROOT
 
+# Browser-like defaults for media downloads (CDNs often check Referer / User-Agent).
+_DEFAULT_DOWNLOAD_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://www.douyin.com/",
+    "Origin": "https://www.douyin.com",
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "cross-site",
+}
+
+
+def _download_request_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    merged = dict(_DEFAULT_DOWNLOAD_HEADERS)
+    if extra:
+        merged.update(extra)
+    return merged
+
+
+try:
+    from curl_cffi import requests as curl_requests
+
+    _CURL_CFFI_AVAILABLE = True
+except ImportError:
+    curl_requests = None  # type: ignore
+    _CURL_CFFI_AVAILABLE = False
+
+
+def _download_media_requests(
+    url: str,
+    full_path: str,
+    headers: Dict[str, str],
+    use_stream: bool,
+) -> None:
+    if use_stream:
+        response = requests.get(
+            url, stream=True, timeout=60, headers=headers
+        )
+        response.raise_for_status()
+        chunk_size = 1024 * 1024
+        with open(full_path, "wb") as f:
+            for data in response.iter_content(chunk_size=chunk_size):
+                f.write(data)
+    else:
+        response = requests.get(url, timeout=60, headers=headers)
+        response.raise_for_status()
+        with open(full_path, "wb") as f:
+            f.write(response.content)
+
+
+def _download_media_curl_cffi(
+    url: str,
+    full_path: str,
+    headers: Dict[str, str],
+    use_stream: bool,
+    impersonate: str,
+) -> None:
+    if not _CURL_CFFI_AVAILABLE or curl_requests is None:
+        raise RuntimeError("curl_cffi is not installed")
+    if use_stream:
+        response = curl_requests.get(
+            url,
+            stream=True,
+            timeout=60,
+            headers=headers,
+            impersonate=impersonate,
+        )
+        response.raise_for_status()
+        chunk_size = 1024 * 1024
+        with open(full_path, "wb") as f:
+            for data in response.iter_content(chunk_size=chunk_size):
+                f.write(data)
+    else:
+        response = curl_requests.get(
+            url,
+            timeout=60,
+            headers=headers,
+            impersonate=impersonate,
+        )
+        response.raise_for_status()
+        with open(full_path, "wb") as f:
+            f.write(response.content)
+
+
 def format_author_data(api_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Format API response data to DyAuthor model fields.
@@ -659,8 +751,13 @@ def save_data(item:dict={}):
                     if not video.valid:
                         video.origin_url = video_data.get("origin_url")
                         video.cover_url = video_data.get("cover_url")
+                        # Ensure video is pending for independent download worker.
+                        video.status = Status.WAITING
                         video.save()
                 else:
+                    # Set status explicitly to avoid relying on implicit defaults.
+                    # This prevents NOT NULL issues if incoming payload contains empty status.
+                    video_data["status"] = Status.WAITING
                     video = DyVideo(valid=False, **video_data)
                     video.save()
             except Exception as e:
@@ -675,27 +772,15 @@ def save_data(item:dict={}):
             with open(os.path.join(save_to, 'info.json'), 'w') as f:
                 json.dump(video_info, f, indent=2, ensure_ascii=False)
 
-            # Download video file
+            # Download is handled by dedicated download worker.
+            # Crawl process only saves metadata and media URLs.
             if not video.valid:
-                logger.info(f"Now download video: {video}")
-                try:
-                    download_media(video.origin_url, save_to, "video.mp4")
-                    download_media(video.cover_url, save_to, "cover.jpg")
-                    video.valid = True
-                    video.save()
-                except Exception as e:
-                    logger.error(f"video download failed, reason: {str(e)}")
-                    video.valid = False
-                    video.save()
-                if video_info.get("images"):
-                    i = 1
-                    for img in video_info.get('images'):
-                        if os.path.isfile(os.path.join(save_to, f'{i}.jpg')):
-                            continue
-                        download_media(img.get("download_url_list")[-1], save_to, f"{i}.jpg")
-                        i = i + 1
+                logger.info(
+                    "Skip media download in crawl flow for video id=%s, waiting for download worker",
+                    video.id,
+                )
             else:
-                logger.info(f"{save_to} already exists, skip")
+                logger.info("%s already exists, skip", save_to)
 
             logger.info(f"Saved video {video.id if video else None} for author {author.id if author else 'unknown'}")
     else:
@@ -747,35 +832,74 @@ def crawl_worker(worker_id, batches, **kwargs):
             # Continue to next batch instead of exiting so remaining batches are still processed
 
 def download_media(url, path, name, **kwargs):
-    """Download media file from URL to local path"""
+    """
+    Download media file from URL to local path.
+
+    Browser-like headers are applied by default. TLS fingerprinting uses curl_cffi
+    when available (helps with CDN throttling / bot checks).
+
+    kwargs:
+        download_backend: "auto" (default), "curl_cffi", or "requests".
+            auto: try curl_cffi first, fall back to requests on failure.
+        impersonate: curl_cffi browser profile (default "chrome131", align with User-Agent).
+        headers: optional dict merged into default download headers.
+    """
     logger.info("url: %s", url)
     full_path = os.path.join(path, name)
-    
-    # Create directory if it doesn't exist
+    headers = _download_request_headers(kwargs.get("headers"))
+    backend = kwargs.get("download_backend", "auto")
+    impersonate = kwargs.get("impersonate", "chrome131")
+    use_stream = kwargs.get("size", 0) > 1048576
+
     os.makedirs(path, exist_ok=True)
-    
+
     if os.path.isfile(full_path):
-        return {'status': 'success', 'message': 'File already exists', 'path': full_path}
+        return {"status": "success", "message": "File already exists", "path": full_path}
+
+    def run_requests() -> None:
+        _download_media_requests(url, full_path, headers, use_stream)
+
+    def run_curl() -> None:
+        _download_media_curl_cffi(
+            url, full_path, headers, use_stream, impersonate
+        )
+
     try:
-        if kwargs.get("size", 0) > 1048576:
-            response = requests.get(url, stream=True, timeout=60)
-            size = 0
-            chunk_size = 1024 * 1024
-            with open(full_path, 'wb') as f:
-                for data in response.iter_content(chunk_size=chunk_size):
-                    f.write(data)
-                    size += len(data)
+        if backend == "requests":
+            run_requests()
+        elif backend == "curl_cffi":
+            if not _CURL_CFFI_AVAILABLE:
+                return {
+                    "status": "error",
+                    "message": "curl_cffi not installed (pip install curl-cffi)",
+                    "path": full_path,
+                }
+            run_curl()
         else:
-            response = requests.get(url, timeout=60)
-            response.raise_for_status()
-        
-            with open(full_path, 'wb') as f:
-                f.write(response.content)
-        
-        return {'status': 'success', 'message': 'Downloaded successfully', 'path': full_path}
+            if backend != "auto":
+                logger.warning(
+                    "Unknown download_backend=%r, using auto", backend
+                )
+            if _CURL_CFFI_AVAILABLE:
+                try:
+                    run_curl()
+                except Exception as e:
+                    logger.warning(
+                        "curl_cffi download failed, falling back to requests: %s",
+                        e,
+                    )
+                    run_requests()
+            else:
+                run_requests()
+
+        return {
+            "status": "success",
+            "message": "Downloaded successfully",
+            "path": full_path,
+        }
     except Exception as e:
-        logger.error(f"Error downloading media from {url}: {str(e)}")
-        return {'status': 'error', 'message': str(e), 'path': full_path}
+        logger.error("Error downloading media from %s: %s", url, e)
+        return {"status": "error", "message": str(e), "path": full_path}
 
 def crawl_authors_batch(aids, **kwargs):
     # Fetch all author objects in the main thread
@@ -820,20 +944,68 @@ def crawl_authors_batch(aids, **kwargs):
 
 def download_videos(video_ids, max_workers=3, **kwargs):
     """
-    Download videos using ThreadPoolExecutor.
+    Download video.mp4 and cover.jpg using ThreadPoolExecutor.
     """
     # Fetch video objects from IDs
     videos = DyVideo.objects.filter(id__in=video_ids)
     results = []
-    
+
+    def download_one(video):
+        save_to = os.path.join(DATADIR, video.path)
+        video_result = download_media(
+            video.origin_url, save_to, "video.mp4", **kwargs
+        )
+
+        if not video.cover_url:
+            cover_result = {
+                "status": "error",
+                "message": "Missing cover_url",
+                "path": os.path.join(save_to, "cover.jpg"),
+            }
+        else:
+            cover_result = download_media(
+                video.cover_url, save_to, "cover.jpg", **kwargs
+            )
+
+        status = "success"
+        messages = []
+        if video_result.get("status") != "success":
+            status = "error"
+            messages.append(f"video: {video_result.get('message', 'unknown error')}")
+        if cover_result.get("status") != "success":
+            status = "error"
+            messages.append(f"cover: {cover_result.get('message', 'unknown error')}")
+
+        if status == "success":
+            video.status = "ready"
+        else:
+            video.status = "error"
+
+        # Refresh validity by local file state through model save().
+        # DyVideo.save() computes valid based on MEDIA_ROOT/path/video.mp4 existence.
+        try:
+            video.save(update_fields=["valid", "updated_at", "status"])
+        except Exception as e:
+            logger.exception("Failed to refresh valid state for video id=%s: %s", video.id, e)
+
+        return {
+            "status": status,
+            "message": "Downloaded successfully" if status == "success" else "; ".join(messages),
+            "video_id": video.id,
+            "video_path": video.path,
+            "video_result": video_result,
+            "cover_result": cover_result,
+        }
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(download_media, video.origin_url, os.path.join(DATADIR, video.path), "video.mp4", **kwargs)
-            for video in videos
-        ]
+        futures = [executor.submit(download_one, video) for video in videos]
         for future in futures:
             result = future.result()
             results.append(result)
-    
-    logger.info(f"Downloaded {len(results)} videos with max_workers={max_workers}")
+
+    logger.info(
+        "Downloaded media for %s videos with max_workers=%s",
+        len(results),
+        max_workers,
+    )
     return results

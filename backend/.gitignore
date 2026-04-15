@@ -7,3 +7,5 @@ migrations
 *.onnx
 *.pth
 *.pyc
+log
+dataset
