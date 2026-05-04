@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,25 +26,23 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.DyVideoDto
+import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.TokenStore
+import com.simplespider.dy.ui.VideosFeedHoist
 import com.simplespider.dy.ui.gestures.rememberSearchBarSwipeNestedConnection
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
@@ -59,29 +56,26 @@ fun VideosScreen(
     modifier: Modifier = Modifier,
     tokenStore: TokenStore,
     authorId: Int? = null,
-    onVideoClick: (DyVideoDto, List<DyVideoDto>, Int) -> Unit,
+    mainTabFeed: VideosFeedHoist? = null,
+    onVideoClick: (DyVideoDto, List<DyVideoDto>, Int, PlayerPlaylistHolder.PlaylistPagination?) -> Unit,
     onVideoCountUpdate: ((Int) -> Unit)? = null,
 ) {
-    var search by remember { mutableStateOf("") }
-    var page by remember { mutableIntStateOf(1) }
-    val items = remember { mutableStateListOf<DyVideoDto>() }
-    var total by remember { mutableIntStateOf(0) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var gridColumns by remember { mutableIntStateOf(2) }
-    var showSearchBar by remember { mutableStateOf(false) }
-    val gridState = rememberLazyGridState()
+    val feed = mainTabFeed ?: remember { VideosFeedHoist() }
     val scope = rememberCoroutineScope()
     val authorIdState = rememberUpdatedState(authorId)
     val searchSwipeConnection = rememberSearchBarSwipeNestedConnection(
         enabled = { authorIdState.value == null },
-        searchVisible = { showSearchBar },
-        onReveal = { if (authorIdState.value == null) showSearchBar = true },
-        onHide = { showSearchBar = false },
+        searchVisible = { feed.showSearchBar },
+        onReveal = { if (authorIdState.value == null) feed.showSearchBar = true },
+        onHide = { feed.showSearchBar = false },
     )
 
     LaunchedEffect(tokenStore) {
-        tokenStore.videoGridColumnsFlow.collect { gridColumns = it }
+        tokenStore.videoGridColumnsFlow.collect { feed.gridColumns = it }
+    }
+
+    LaunchedEffect(tokenStore) {
+        tokenStore.videoListRandomFlow.collect { feed.useRandomList = it }
     }
 
     suspend fun randomQueryParam(): String? =
@@ -89,25 +83,25 @@ fun VideosScreen(
 
     fun resetAndLoad() {
         scope.launch {
-            loading = true
-            error = null
-            page = 1
-            items.clear()
+            feed.loading = true
+            feed.error = null
+            feed.page = 1
+            feed.items.clear()
             try {
                 val res = ApiClient.api.listVideos(
                     limit = 20,
                     page = 1,
-                    search = search.ifBlank { null },
+                    search = feed.search.ifBlank { null },
                     authorId = authorId,
                     random = randomQueryParam(),
                 )
-                total = res.count
+                feed.total = res.count
                 onVideoCountUpdate?.invoke(res.count)
-                res.results?.let { items.addAll(it) }
+                res.results?.let { feed.items.addAll(it) }
             } catch (e: Exception) {
-                error = e.message
+                feed.error = e.message
             } finally {
-                loading = false
+                feed.loading = false
             }
         }
     }
@@ -118,9 +112,12 @@ fun VideosScreen(
                 resetAndLoad()
             }
         } else {
+            if (feed.items.isEmpty()) {
+                resetAndLoad()
+            }
             merge(
-                tokenStore.videoListRandomFlow.map { },
-                snapshotFlow { search }
+                tokenStore.videoListRandomFlow.drop(1).map { },
+                snapshotFlow { feed.search }
                     .drop(1)
                     .debounce(1600L)
                     .map { },
@@ -130,32 +127,32 @@ fun VideosScreen(
         }
     }
 
-    LaunchedEffect(gridState, authorId, tokenStore) {
+    LaunchedEffect(feed.gridState, authorId, tokenStore) {
         snapshotFlow {
-            val info = gridState.layoutInfo
+            val info = feed.gridState.layoutInfo
             val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last to items.size
+            last to feed.items.size
         }.collect { (lastVisible, size) ->
-            if (size == 0 || loading) return@collect
-            if (lastVisible >= size - 4 && items.size < total) {
-                loading = true
+            if (size == 0 || feed.loading) return@collect
+            if (lastVisible >= size - 4 && feed.items.size < feed.total) {
+                feed.loading = true
                 try {
-                    val next = page + 1
+                    val next = feed.page + 1
                     val res = ApiClient.api.listVideos(
                         limit = 20,
                         page = next,
-                        search = search.ifBlank { null },
+                        search = feed.search.ifBlank { null },
                         authorId = authorId,
                         random = randomQueryParam(),
                     )
-                    val newItems = res.results.orEmpty().filter { n -> items.none { it.id == n.id } }
+                    val newItems = res.results.orEmpty().filter { n -> feed.items.none { it.id == n.id } }
                     if (newItems.isNotEmpty()) {
-                        items.addAll(newItems)
-                        page = next
+                        feed.items.addAll(newItems)
+                        feed.page = next
                     }
                 } catch (_: Exception) {
                 } finally {
-                    loading = false
+                    feed.loading = false
                 }
             }
         }
@@ -167,8 +164,8 @@ fun VideosScreen(
     Box(modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         Column(Modifier.fillMaxSize()) {
             when {
-                error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
-                items.isEmpty() && loading -> Box(
+                feed.error != null -> Text(feed.error!!, color = MaterialTheme.colorScheme.error)
+                feed.items.isEmpty() && feed.loading -> Box(
                     Modifier
                         .weight(1f)
                         .fillMaxSize()
@@ -182,19 +179,29 @@ fun VideosScreen(
                         .weight(1f)
                         .fillMaxSize()
                         .then(listPullNestedModifier),
-                    columns = GridCells.Fixed(gridColumns.coerceIn(2, 4)),
-                    state = gridState,
+                    columns = GridCells.Fixed(feed.gridColumns.coerceIn(2, 4)),
+                    state = feed.gridState,
                     contentPadding = PaddingValues(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(items, key = { it.id }) { video ->
+                    items(feed.items, key = { it.id }) { video ->
                         VideoGridItem(
                             video = video,
                             onOpen = {
-                                val playable = items.filter { !it.playSrc.isNullOrBlank() }
+                                val playable = feed.items.filter { !it.playSrc.isNullOrBlank() }
                                 val idx = playable.indexOfFirst { it.id == video.id }
-                                if (idx >= 0) onVideoClick(video, playable, idx)
+                                if (idx >= 0) {
+                                    val pagination = PlayerPlaylistHolder.PlaylistPagination(
+                                        limit = 20,
+                                        nextPageToLoad = feed.page + 1,
+                                        remoteTotal = feed.total,
+                                        search = feed.search.ifBlank { null },
+                                        authorId = authorId,
+                                        useRandomList = feed.useRandomList,
+                                    )
+                                    onVideoClick(video, playable, idx, pagination)
+                                }
                             },
                         )
                     }
@@ -203,7 +210,7 @@ fun VideosScreen(
         }
         if (authorId == null) {
             AnimatedVisibility(
-                visible = showSearchBar,
+                visible = feed.showSearchBar,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth(),
@@ -217,8 +224,8 @@ fun VideosScreen(
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                 ) {
                     OutlinedTextField(
-                        value = search,
-                        onValueChange = { search = it },
+                        value = feed.search,
+                        onValueChange = { feed.search = it },
                         label = { Text("Search", style = MaterialTheme.typography.labelMedium) },
                         placeholder = {
                             Text(
@@ -264,10 +271,13 @@ private fun VideoGridItem(
             )
             Text(
                 title,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+                textAlign = TextAlign.Start,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
             )
         }
     }

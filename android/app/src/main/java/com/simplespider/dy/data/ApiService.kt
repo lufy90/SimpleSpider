@@ -39,4 +39,7 @@ interface ApiService {
         @Query("random") random: String? = null,
     ): PagedVideos
 
+    @PATCH("dy/video/{id}/")
+    suspend fun patchVideo(@Path("id") id: Int, @Body body: RatePatchBody): DyVideoDto
+
 }

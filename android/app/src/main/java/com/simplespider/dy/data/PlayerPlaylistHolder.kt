@@ -10,36 +10,53 @@ object PlayerPlaylistHolder {
         val playUrl: String,
         val authorId: Int?,
         val authorAvatarSrc: String?,
+        val rate: Float? = null,
+    )
+
+    data class PlaylistPagination(
+        val limit: Int,
+        val nextPageToLoad: Int,
+        val remoteTotal: Int,
+        val search: String?,
+        val authorId: Int?,
+        val useRandomList: Boolean,
     )
 
     data class PlaylistSnapshot(
         val entries: List<Entry>,
         val startIndex: Int,
         val openedFromAuthorId: Int?,
+        val pagination: PlaylistPagination? = null,
     )
 
     private var entries: List<Entry> = emptyList()
     private var startIndex: Int = 0
     private var openedFromAuthorId: Int? = null
+    private var heldPagination: PlaylistPagination? = null
+
+    fun entryFromVideo(v: DyVideoDto): Entry {
+        val url = v.playSrc?.trim().orEmpty()
+        val fromApi = v.authorAvatarSrc?.trim()?.takeIf { it.isNotEmpty() }
+        val avatar = fromApi ?: avatarUrlFromVideoPlayUrl(url)
+        return Entry(
+            id = v.id,
+            title = videoTitle(v),
+            playUrl = url,
+            authorId = v.author,
+            authorAvatarSrc = avatar,
+            rate = v.rate,
+        )
+    }
 
     fun setFromVideos(
         playableVideos: List<DyVideoDto>,
         startIndex: Int,
         openedFromAuthorContextId: Int? = null,
+        pagination: PlaylistPagination? = null,
     ) {
         openedFromAuthorId = openedFromAuthorContextId
-        entries = playableVideos.map { v ->
-            val url = v.playSrc?.trim().orEmpty()
-            val fromApi = v.authorAvatarSrc?.trim()?.takeIf { it.isNotEmpty() }
-            val avatar = fromApi ?: avatarUrlFromVideoPlayUrl(url)
-            Entry(
-                id = v.id,
-                title = videoTitle(v),
-                playUrl = url,
-                authorId = v.author,
-                authorAvatarSrc = avatar,
-            )
-        }
+        heldPagination = pagination
+        entries = playableVideos.map { entryFromVideo(it) }
         this.startIndex = if (entries.isEmpty()) {
             0
         } else {
@@ -53,10 +70,12 @@ object PlayerPlaylistHolder {
             entries = entries.toList(),
             startIndex = startIndex,
             openedFromAuthorId = openedFromAuthorId,
+            pagination = heldPagination,
         )
         entries = emptyList()
         startIndex = 0
         openedFromAuthorId = null
+        heldPagination = null
         return copy
     }
 

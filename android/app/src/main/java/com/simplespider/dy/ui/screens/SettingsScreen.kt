@@ -10,22 +10,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,11 +39,10 @@ import com.simplespider.dy.ui.theme.DyTextSecondary
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    modifier: Modifier = Modifier,
     tokenStore: TokenStore,
-    onBack: () -> Unit,
     onLoggedOut: () -> Unit = {},
 ) {
     var apiHostDraft by remember { mutableStateOf("") }
@@ -73,28 +64,12 @@ fun SettingsScreen(
         tokenStore.tokenFlow.collect { loggedIn = !it.isNullOrBlank() }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-            )
-        },
-    ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
             Text("API server", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
@@ -243,5 +218,4 @@ fun SettingsScreen(
                 }
             }
         }
-    }
 }

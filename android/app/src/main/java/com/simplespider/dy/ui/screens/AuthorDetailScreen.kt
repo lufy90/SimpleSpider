@@ -32,6 +32,7 @@ import coil.compose.AsyncImage
 import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.DyAuthorDto
 import com.simplespider.dy.data.DyVideoDto
+import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.RatePatchBody
 import com.simplespider.dy.data.TokenStore
 import com.simplespider.dy.ui.components.RateStarsRow
@@ -42,7 +43,7 @@ fun AuthorDetailScreen(
     authorId: Int,
     tokenStore: TokenStore,
     onBack: () -> Unit,
-    onVideoClick: (DyVideoDto, List<DyVideoDto>, Int) -> Unit,
+    onVideoClick: (DyVideoDto, List<DyVideoDto>, Int, PlayerPlaylistHolder.PlaylistPagination?) -> Unit,
 ) {
     var author by remember { mutableStateOf<DyAuthorDto?>(null) }
     var loading by remember { mutableStateOf(true) }

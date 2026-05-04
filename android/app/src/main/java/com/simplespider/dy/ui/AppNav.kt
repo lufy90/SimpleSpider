@@ -1,6 +1,9 @@
 package com.simplespider.dy.ui
 
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -19,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -65,6 +69,8 @@ fun AppNav(
     val dest = startDest
     if (dest == null) return
 
+    val mainVideosFeedHoist = remember { VideosFeedHoist() }
+
     NavHost(navController = navController, startDestination = dest) {
         composable(ROUTE_LOGIN) {
             LoginScreen(
@@ -81,6 +87,7 @@ fun AppNav(
             MainTabs(
                 navController = navController,
                 tokenStore = tokenStore,
+                mainVideosFeedHoist = mainVideosFeedHoist,
                 onLoggedOut = {
                     navController.navigate(ROUTE_LOGIN) {
                         popUpTo(navController.graph.id) { inclusive = true }
@@ -91,8 +98,8 @@ fun AppNav(
         }
         composable(ROUTE_SETTINGS) {
             SettingsScreen(
+                modifier = Modifier.safeDrawingPadding(),
                 tokenStore = tokenStore,
-                onBack = { navController.popBackStack() },
                 onLoggedOut = {
                     navController.navigate(ROUTE_LOGIN) {
                         popUpTo(navController.graph.id) { inclusive = true }
@@ -114,10 +121,11 @@ fun AppNav(
                 return@composable
             }
             VideoPlayerScreen(
-                entries = playlist,
+                initialEntries = playlist,
                 initialIndex = start,
                 tokenStore = tokenStore,
                 openedFromAuthorId = snapshot.openedFromAuthorId,
+                pagination = snapshot.pagination,
                 onNavigateToAuthor = { authorNavId ->
                     navController.navigate("author_from_player/$authorNavId") {
                         launchSingleTop = true
@@ -137,11 +145,12 @@ fun AppNav(
                 authorId = authorId,
                 tokenStore = tokenStore,
                 onBack = { navController.popBackStack() },
-                onVideoClick = { _, playlist, index ->
+                onVideoClick = { _, playlist, index, pagination ->
                     PlayerPlaylistHolder.setFromVideos(
                         playlist,
                         index,
                         openedFromAuthorContextId = authorId,
+                        pagination = pagination,
                     )
                     navController.navigate(ROUTE_PLAYER)
                 },
@@ -154,30 +163,51 @@ fun AppNav(
 private fun MainTabs(
     navController: NavHostController,
     tokenStore: TokenStore,
+    mainVideosFeedHoist: VideosFeedHoist,
     onLoggedOut: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                modifier = Modifier.height(72.dp),
+            ) {
                 NavigationBarItem(
                     selected = tab == 0,
                     onClick = { tab = 0 },
-                    icon = { Icon(Icons.Filled.Person, contentDescription = "Authors") },
+                    icon = {
+                        Icon(
+                            Icons.Filled.Person,
+                            contentDescription = "Authors",
+                            modifier = Modifier.size(26.dp),
+                        )
+                    },
                     label = { },
                     alwaysShowLabel = false,
                 )
                 NavigationBarItem(
                     selected = tab == 1,
                     onClick = { tab = 1 },
-                    icon = { Icon(Icons.Filled.PlayArrow, contentDescription = "Videos") },
+                    icon = {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = "Videos",
+                            modifier = Modifier.size(26.dp),
+                        )
+                    },
                     label = { },
                     alwaysShowLabel = false,
                 )
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
+                    icon = {
+                        Icon(
+                            Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                            modifier = Modifier.size(26.dp),
+                        )
+                    },
                     label = { },
                     alwaysShowLabel = false,
                 )
@@ -194,14 +224,15 @@ private fun MainTabs(
                 modifier = Modifier.padding(padding),
                 tokenStore = tokenStore,
                 authorId = null,
-                onVideoClick = { _, playlist, index ->
-                    PlayerPlaylistHolder.setFromVideos(playlist, index)
+                mainTabFeed = mainVideosFeedHoist,
+                onVideoClick = { _, playlist, index, pagination ->
+                    PlayerPlaylistHolder.setFromVideos(playlist, index, pagination = pagination)
                     navController.navigate(ROUTE_PLAYER)
                 },
             )
             2 -> SettingsScreen(
+                modifier = Modifier.padding(padding),
                 tokenStore = tokenStore,
-                onBack = { tab = 0 },
                 onLoggedOut = onLoggedOut,
             )
         }
@@ -240,11 +271,12 @@ private fun AuthorsTabWithNestedNav(
                 authorId = authorId,
                 tokenStore = tokenStore,
                 onBack = { authorsNavController.popBackStack() },
-                onVideoClick = { _, playlist, index ->
+                onVideoClick = { _, playlist, index, pagination ->
                     PlayerPlaylistHolder.setFromVideos(
                         playlist,
                         index,
                         openedFromAuthorContextId = authorId,
+                        pagination = pagination,
                     )
                     rootNavController.navigate(ROUTE_PLAYER)
                 },
