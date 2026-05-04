@@ -11,6 +11,10 @@ data class LoginResponse(
     @SerializedName("access_token") val accessToken: String,
 )
 
+data class RatePatchBody(
+    val rate: Int,
+)
+
 data class PagedAuthors(
     val count: Int,
     val results: List<DyAuthorDto>?,
@@ -47,4 +51,5 @@ data class DyVideoDto(
     val rate: Float?,
     @SerializedName("is_like") val isLike: Boolean?,
     @SerializedName("is_favor") val isFavor: Boolean?,
+    @SerializedName("author_avatar_src") val authorAvatarSrc: String? = null,
 )

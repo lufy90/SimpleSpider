@@ -16,6 +16,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +39,7 @@ import kotlinx.coroutines.launch
 fun LoginScreen(
     tokenStore: TokenStore,
     onLoggedIn: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -55,7 +57,11 @@ fun LoginScreen(
         Text("SimpleSpider", color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
         Text("Sign in to continue", color = DyTextSecondary)
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onOpenSettings) {
+            Text("Settings (API server)")
+        }
+        Spacer(Modifier.height(24.dp))
         OutlinedTextField(
             value = username,
             onValueChange = { username = it; error = null },
@@ -76,7 +82,9 @@ fun LoginScreen(
             colors = OutlinedTextFieldDefaults.colors(),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = {
-                scope.launch { doLogin(username, password, tokenStore, { loading = it }, { error = it }, onLoggedIn) }
+                scope.launch {
+                    doLogin(username, password, tokenStore, { loading = it }, { error = it }, onLoggedIn)
+                }
             }),
         )
         if (error != null) {

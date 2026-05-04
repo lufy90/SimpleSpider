@@ -11,6 +11,12 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
+    @Volatile
+    private var overrideBaseUrl: String? = null
+
+    @Volatile
+    private var apiService: ApiService? = null
+
     private val gson = GsonBuilder()
         .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
         .create()
@@ -39,13 +45,27 @@ object ApiClient {
         .addInterceptor(logging)
         .build()
 
-    val api: ApiService by lazy {
-        Retrofit.Builder()
-            .baseUrl(BuildConfig.API_BASE_URL.ensureTrailingSlash())
+    @Synchronized
+    fun applyBaseUrlOverride(apiBaseUrlOrNull: String?) {
+        val normalized = apiBaseUrlOrNull?.ensureTrailingSlash()
+        if (normalized == overrideBaseUrl) return
+        overrideBaseUrl = normalized
+        apiService = null
+    }
+
+    val api: ApiService
+        get() = synchronized(this) {
+            apiService ?: buildRetrofit().create(ApiService::class.java).also { apiService = it }
+        }
+
+    private fun buildRetrofit(): Retrofit {
+        val base = (overrideBaseUrl ?: BuildConfig.API_BASE_URL.ensureTrailingSlash())
+            .ensureTrailingSlash()
+        return Retrofit.Builder()
+            .baseUrl(base)
             .client(okHttp)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
-            .create(ApiService::class.java)
     }
 
     private fun String.ensureTrailingSlash(): String =

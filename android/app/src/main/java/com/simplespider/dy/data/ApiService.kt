@@ -2,6 +2,7 @@ package com.simplespider.dy.data
 
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -23,6 +24,9 @@ interface ApiService {
     @GET("dy/author/{id}/")
     suspend fun getAuthor(@Path("id") id: Int): DyAuthorDto
 
+    @PATCH("dy/author/{id}/")
+    suspend fun patchAuthor(@Path("id") id: Int, @Body body: RatePatchBody): DyAuthorDto
+
     @GET("dy/video/")
     suspend fun listVideos(
         @Query("limit") limit: Int,
@@ -32,5 +36,7 @@ interface ApiService {
         @Query("is_like") isLike: Boolean? = null,
         @Query("is_favor") isFavor: Boolean? = null,
         @Query("author") authorId: Int? = null,
+        @Query("random") random: String? = null,
     ): PagedVideos
+
 }

@@ -30,7 +30,8 @@ class DyVideoSerializer(serializers.ModelSerializer):
     """Serializer for DyVideo model"""
     cover_src = serializers.SerializerMethodField()
     play_src = serializers.SerializerMethodField()
-    
+    author_avatar_src = serializers.SerializerMethodField()
+
     class Meta:
         model = DyVideo
         fields = '__all__'
@@ -62,6 +63,19 @@ class DyVideoSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(f"{settings.MEDIA_URL}{video_path}")
         else:
             return f"{settings.MEDIA_URL}{video_path}"
+
+    def get_author_avatar_src(self, obj):
+        if not getattr(obj, "author_id", None):
+            return None
+        author = getattr(obj, "author", None)
+        if author is None or not author.path:
+            return None
+        path = author.path.rstrip('/')
+        avatar_path = f"{path}/avatar.jpg"
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(f"{settings.MEDIA_URL}{avatar_path}")
+        return f"{settings.MEDIA_URL}{avatar_path}"
 
     def update(self, instance, validated_data):
         if "rate" in validated_data:

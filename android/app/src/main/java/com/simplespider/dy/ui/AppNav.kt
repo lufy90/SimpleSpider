@@ -1,10 +1,10 @@
 package com.simplespider.dy.ui
 
-import android.util.Base64
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -16,25 +16,36 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.AuthTokenHolder
+import com.simplespider.dy.data.hostPortInputToApiBaseUrl
+import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.TokenStore
 import com.simplespider.dy.ui.screens.AuthorDetailScreen
 import com.simplespider.dy.ui.screens.AuthorsScreen
 import com.simplespider.dy.ui.screens.LoginScreen
+import com.simplespider.dy.ui.screens.rememberAuthorsListHoistedState
+import com.simplespider.dy.ui.screens.SettingsScreen
 import com.simplespider.dy.ui.screens.VideoPlayerScreen
 import com.simplespider.dy.ui.screens.VideosScreen
 import kotlinx.coroutines.flow.first
 
 private const val ROUTE_LOGIN = "login"
 private const val ROUTE_MAIN = "main"
-private const val ROUTE_AUTHOR = "author/{authorId}"
-private const val ROUTE_PLAYER = "player/{urlB64}"
+private const val ROUTE_AUTHORS_LIST = "authors_list"
+private const val ROUTE_AUTHORS_DETAIL = "authors_detail/{authorId}"
+private const val ROUTE_PLAYER = "player"
+private const val ROUTE_AUTHOR_FROM_PLAYER = "author_from_player/{authorId}"
+private const val ROUTE_SETTINGS = "settings"
 
 @Composable
 fun AppNav(
@@ -44,6 +55,8 @@ fun AppNav(
     var startDest by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
+        val savedHost = tokenStore.apiServerFlow.first()
+        ApiClient.applyBaseUrlOverride(hostPortInputToApiBaseUrl(savedHost.orEmpty()))
         val token = tokenStore.tokenFlow.first()
         AuthTokenHolder.setToken(token)
         startDest = if (token.isNullOrBlank()) ROUTE_LOGIN else ROUTE_MAIN
@@ -61,81 +74,179 @@ fun AppNav(
                         popUpTo(ROUTE_LOGIN) { inclusive = true }
                     }
                 },
+                onOpenSettings = { navController.navigate(ROUTE_SETTINGS) },
             )
         }
         composable(ROUTE_MAIN) {
             MainTabs(
                 navController = navController,
+                tokenStore = tokenStore,
+                onLoggedOut = {
+                    navController.navigate(ROUTE_LOGIN) {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
             )
         }
-        composable(ROUTE_AUTHOR) { entry ->
-            val id = entry.arguments?.getString("authorId")?.toIntOrNull() ?: return@composable
-            AuthorDetailScreen(
-                authorId = id,
+        composable(ROUTE_SETTINGS) {
+            SettingsScreen(
+                tokenStore = tokenStore,
                 onBack = { navController.popBackStack() },
-                onVideoClick = click@{ video ->
-                    val url = video.playSrc ?: return@click
-                    val enc = Base64.encodeToString(
-                        url.toByteArray(Charsets.UTF_8),
-                        Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
-                    )
-                    navController.navigate("player/$enc")
+                onLoggedOut = {
+                    navController.navigate(ROUTE_LOGIN) {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                        launchSingleTop = true
+                    }
                 },
             )
         }
         composable(ROUTE_PLAYER) { entry ->
-            val b64 = entry.arguments?.getString("urlB64") ?: return@composable
-            val url = decodeB64(b64)
+            val snapshot = remember(entry) { PlayerPlaylistHolder.takeSnapshotAndClear() }
+            if (snapshot == null) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+                return@composable
+            }
+            val playlist = snapshot.entries
+            val start = snapshot.startIndex
+            if (playlist.isEmpty()) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+                return@composable
+            }
             VideoPlayerScreen(
-                playUrl = url,
-                title = "Video",
+                entries = playlist,
+                initialIndex = start,
+                tokenStore = tokenStore,
+                openedFromAuthorId = snapshot.openedFromAuthorId,
+                onNavigateToAuthor = { authorNavId ->
+                    navController.navigate("author_from_player/$authorNavId") {
+                        launchSingleTop = true
+                    }
+                },
                 onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route = ROUTE_AUTHOR_FROM_PLAYER,
+            arguments = listOf(
+                navArgument("authorId") { type = NavType.IntType },
+            ),
+        ) { backStackEntry ->
+            val authorId = backStackEntry.arguments?.getInt("authorId") ?: return@composable
+            AuthorDetailScreen(
+                authorId = authorId,
+                tokenStore = tokenStore,
+                onBack = { navController.popBackStack() },
+                onVideoClick = { _, playlist, index ->
+                    PlayerPlaylistHolder.setFromVideos(
+                        playlist,
+                        index,
+                        openedFromAuthorContextId = authorId,
+                    )
+                    navController.navigate(ROUTE_PLAYER)
+                },
             )
         }
     }
 }
 
-private fun decodeB64(b64: String): String {
-    val bytes = Base64.decode(b64, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-    return String(bytes, Charsets.UTF_8)
-}
-
 @Composable
-private fun MainTabs(navController: NavHostController) {
-    var tab by remember { mutableIntStateOf(0) }
+private fun MainTabs(
+    navController: NavHostController,
+    tokenStore: TokenStore,
+    onLoggedOut: () -> Unit,
+) {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     Scaffold(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
                     selected = tab == 0,
                     onClick = { tab = 0 },
-                    icon = { Icon(Icons.Filled.Person, null) },
-                    label = { Text("Authors") },
+                    icon = { Icon(Icons.Filled.Person, contentDescription = "Authors") },
+                    label = { },
+                    alwaysShowLabel = false,
                 )
                 NavigationBarItem(
                     selected = tab == 1,
                     onClick = { tab = 1 },
-                    icon = { Icon(Icons.Filled.PlayArrow, null) },
-                    label = { Text("Videos") },
+                    icon = { Icon(Icons.Filled.PlayArrow, contentDescription = "Videos") },
+                    label = { },
+                    alwaysShowLabel = false,
+                )
+                NavigationBarItem(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
+                    label = { },
+                    alwaysShowLabel = false,
                 )
             }
         },
     ) { padding ->
         when (tab) {
-            0 -> AuthorsScreen(
+            0 -> AuthorsTabWithNestedNav(
                 modifier = Modifier.padding(padding),
-                onAuthorClick = { id -> navController.navigate("author/$id") },
+                tokenStore = tokenStore,
+                rootNavController = navController,
             )
             1 -> VideosScreen(
                 modifier = Modifier.padding(padding),
+                tokenStore = tokenStore,
                 authorId = null,
-                onVideoClick = tabVideo@{ video ->
-                    val url = video.playSrc ?: return@tabVideo
-                    val enc = Base64.encodeToString(
-                        url.toByteArray(Charsets.UTF_8),
-                        Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+                onVideoClick = { _, playlist, index ->
+                    PlayerPlaylistHolder.setFromVideos(playlist, index)
+                    navController.navigate(ROUTE_PLAYER)
+                },
+            )
+            2 -> SettingsScreen(
+                tokenStore = tokenStore,
+                onBack = { tab = 0 },
+                onLoggedOut = onLoggedOut,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AuthorsTabWithNestedNav(
+    modifier: Modifier = Modifier,
+    tokenStore: TokenStore,
+    rootNavController: NavHostController,
+) {
+    val authorsNavController = rememberNavController()
+    val hoisted = rememberAuthorsListHoistedState()
+    NavHost(
+        navController = authorsNavController,
+        startDestination = ROUTE_AUTHORS_LIST,
+        modifier = modifier,
+    ) {
+        composable(ROUTE_AUTHORS_LIST) {
+            AuthorsScreen(
+                hoistedState = hoisted,
+                onAuthorClick = { id ->
+                    authorsNavController.navigate("authors_detail/$id")
+                },
+            )
+        }
+        composable(
+            route = ROUTE_AUTHORS_DETAIL,
+            arguments = listOf(
+                navArgument("authorId") { type = NavType.IntType },
+            ),
+        ) { entry ->
+            val authorId = entry.arguments?.getInt("authorId") ?: return@composable
+            AuthorDetailScreen(
+                authorId = authorId,
+                tokenStore = tokenStore,
+                onBack = { authorsNavController.popBackStack() },
+                onVideoClick = { _, playlist, index ->
+                    PlayerPlaylistHolder.setFromVideos(
+                        playlist,
+                        index,
+                        openedFromAuthorContextId = authorId,
                     )
-                    navController.navigate("player/$enc")
+                    rootNavController.navigate(ROUTE_PLAYER)
                 },
             )
         }
