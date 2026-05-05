@@ -33,8 +33,11 @@ interface ApiService {
         @Query("page") page: Int,
         @Query("search") search: String? = null,
         @Query("rate") rate: Int? = null,
+        @Query("min_rate") minRate: Int? = null,
+        @Query("max_rate") maxRate: Int? = null,
         @Query("is_like") isLike: Boolean? = null,
         @Query("is_favor") isFavor: Boolean? = null,
+        @Query("status") status: String? = null,
         @Query("author") authorId: Int? = null,
         @Query("random") random: String? = null,
     ): PagedVideos

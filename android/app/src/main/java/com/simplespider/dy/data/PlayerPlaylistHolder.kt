@@ -20,6 +20,7 @@ object PlayerPlaylistHolder {
         val search: String?,
         val authorId: Int?,
         val useRandomList: Boolean,
+        val query: VideoListQueryParams = VideoListQueryParams(),
     )
 
     data class PlaylistSnapshot(

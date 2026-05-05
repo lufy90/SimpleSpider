@@ -116,7 +116,15 @@ class DyVideoView(ModelViewSet):
     serializer_class = DyVideoSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['author', 'rate', 'is_like', 'is_favor', 'valid', 'is_auto_rated']
+    filterset_fields = [
+        'author',
+        'rate',
+        'is_like',
+        'is_favor',
+        'valid',
+        'is_auto_rated',
+        'status',
+    ]
     search_fields = ['name', 'desc', 'author_name', 'path']
     ordering_fields = ['created_at', 'updated_at', 'rate', 'name']
     ordering = ['-created_at']
@@ -134,6 +142,20 @@ class DyVideoView(ModelViewSet):
             if random_mode and backend is OrderingFilter:
                 continue
             queryset = backend().filter_queryset(self.request, queryset, self)
+
+        qp = self.request.query_params
+        min_raw = (qp.get('min_rate') or '').strip()
+        if min_raw:
+            try:
+                queryset = queryset.filter(rate__gte=int(min_raw))
+            except ValueError:
+                pass
+        max_raw = (qp.get('max_rate') or '').strip()
+        if max_raw:
+            try:
+                queryset = queryset.filter(rate__lte=int(max_raw))
+            except ValueError:
+                pass
 
         if random_mode:
             queryset = queryset.order_by('?')

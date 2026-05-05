@@ -40,6 +40,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun AuthorDetailScreen(
+    modifier: Modifier = Modifier,
     authorId: Int,
     tokenStore: TokenStore,
     onBack: () -> Unit,
@@ -69,12 +70,12 @@ fun AuthorDetailScreen(
 
     when {
         loading -> Box(
-            Modifier.fillMaxSize(),
+            modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) { CircularProgressIndicator() }
 
         author != null -> Column(
-            Modifier.fillMaxSize(),
+            modifier.fillMaxSize(),
         ) {
                 Row(
                     Modifier
@@ -149,7 +150,7 @@ fun AuthorDetailScreen(
 
         else -> Text(
             text = error ?: "Unknown error",
-            modifier = Modifier.padding(16.dp),
+            modifier = modifier.padding(16.dp),
             color = MaterialTheme.colorScheme.error,
         )
     }

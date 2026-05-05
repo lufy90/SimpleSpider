@@ -88,16 +88,24 @@ fun VideosScreen(
             feed.page = 1
             feed.items.clear()
             try {
+                val q = tokenStore.readVideoListQueryParams()
                 val res = ApiClient.api.listVideos(
                     limit = 20,
                     page = 1,
                     search = feed.search.ifBlank { null },
                     authorId = authorId,
                     random = randomQueryParam(),
+                    rate = q.rate,
+                    minRate = q.minRate,
+                    maxRate = q.maxRate,
+                    isLike = q.isLike,
+                    isFavor = q.isFavor,
+                    status = q.status,
                 )
                 feed.total = res.count
                 onVideoCountUpdate?.invoke(res.count)
                 res.results?.let { feed.items.addAll(it) }
+                feed.querySnapshotForLoadedList = q
             } catch (e: Exception) {
                 feed.error = e.message
             } finally {
@@ -108,15 +116,25 @@ fun VideosScreen(
 
     LaunchedEffect(authorId, tokenStore) {
         if (authorId != null) {
-            tokenStore.videoListRandomFlow.collect {
-                resetAndLoad()
-            }
-        } else {
-            if (feed.items.isEmpty()) {
+            val currentQ = tokenStore.readVideoListQueryParams()
+            if (feed.items.isEmpty() || feed.querySnapshotForLoadedList != currentQ) {
                 resetAndLoad()
             }
             merge(
                 tokenStore.videoListRandomFlow.drop(1).map { },
+                tokenStore.videoListQueryParamsFlow.drop(1).map { },
+            ).collect {
+                resetAndLoad()
+            }
+        } else {
+            val currentQ = tokenStore.readVideoListQueryParams()
+            val queryMismatch = feed.querySnapshotForLoadedList != currentQ
+            if (feed.items.isEmpty() || queryMismatch) {
+                resetAndLoad()
+            }
+            merge(
+                tokenStore.videoListRandomFlow.drop(1).map { },
+                tokenStore.videoListQueryParamsFlow.drop(1).map { },
                 snapshotFlow { feed.search }
                     .drop(1)
                     .debounce(1600L)
@@ -138,12 +156,19 @@ fun VideosScreen(
                 feed.loading = true
                 try {
                     val next = feed.page + 1
+                    val q = tokenStore.readVideoListQueryParams()
                     val res = ApiClient.api.listVideos(
                         limit = 20,
                         page = next,
                         search = feed.search.ifBlank { null },
                         authorId = authorId,
                         random = randomQueryParam(),
+                        rate = q.rate,
+                        minRate = q.minRate,
+                        maxRate = q.maxRate,
+                        isLike = q.isLike,
+                        isFavor = q.isFavor,
+                        status = q.status,
                     )
                     val newItems = res.results.orEmpty().filter { n -> feed.items.none { it.id == n.id } }
                     if (newItems.isNotEmpty()) {
@@ -189,18 +214,22 @@ fun VideosScreen(
                         VideoGridItem(
                             video = video,
                             onOpen = {
-                                val playable = feed.items.filter { !it.playSrc.isNullOrBlank() }
-                                val idx = playable.indexOfFirst { it.id == video.id }
-                                if (idx >= 0) {
-                                    val pagination = PlayerPlaylistHolder.PlaylistPagination(
-                                        limit = 20,
-                                        nextPageToLoad = feed.page + 1,
-                                        remoteTotal = feed.total,
-                                        search = feed.search.ifBlank { null },
-                                        authorId = authorId,
-                                        useRandomList = feed.useRandomList,
-                                    )
-                                    onVideoClick(video, playable, idx, pagination)
+                                scope.launch {
+                                    val q = tokenStore.readVideoListQueryParams()
+                                    val playable = feed.items.filter { !it.playSrc.isNullOrBlank() }
+                                    val idx = playable.indexOfFirst { it.id == video.id }
+                                    if (idx >= 0) {
+                                        val pagination = PlayerPlaylistHolder.PlaylistPagination(
+                                            limit = 20,
+                                            nextPageToLoad = feed.page + 1,
+                                            remoteTotal = feed.total,
+                                            search = feed.search.ifBlank { null },
+                                            authorId = authorId,
+                                            useRandomList = feed.useRandomList,
+                                            query = q,
+                                        )
+                                        onVideoClick(video, playable, idx, pagination)
+                                    }
                                 }
                             },
                         )

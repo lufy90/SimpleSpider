@@ -136,12 +136,19 @@ fun VideoPlayerScreen(
                     }
                     try {
                         val random = if (cur.useRandomList) "true" else null
+                        val q = cur.query
                         val res = ApiClient.api.listVideos(
                             limit = cur.limit,
                             page = cur.nextPageToLoad,
                             search = cur.search,
                             authorId = cur.authorId,
                             random = random,
+                            rate = q.rate,
+                            minRate = q.minRate,
+                            maxRate = q.maxRate,
+                            isLike = q.isLike,
+                            isFavor = q.isFavor,
+                            status = q.status,
                         )
                         val raw = res.results.orEmpty()
                         val newTotal = if (res.count > 0) res.count else cur.remoteTotal

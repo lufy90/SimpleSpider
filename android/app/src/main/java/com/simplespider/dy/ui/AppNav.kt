@@ -142,6 +142,7 @@ fun AppNav(
         ) { backStackEntry ->
             val authorId = backStackEntry.arguments?.getInt("authorId") ?: return@composable
             AuthorDetailScreen(
+                modifier = Modifier.safeDrawingPadding(),
                 authorId = authorId,
                 tokenStore = tokenStore,
                 onBack = { navController.popBackStack() },
