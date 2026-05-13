@@ -31,6 +31,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.AuthTokenHolder
+import com.simplespider.dy.data.UnauthorizedSessionHandler
 import com.simplespider.dy.data.hostPortInputToApiBaseUrl
 import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.TokenStore
@@ -68,6 +69,17 @@ fun AppNav(
 
     val dest = startDest
     if (dest == null) return
+
+    LaunchedEffect(navController, tokenStore) {
+        UnauthorizedSessionHandler.events.collect {
+            tokenStore.clearToken()
+            AuthTokenHolder.setToken(null)
+            navController.navigate(ROUTE_LOGIN) {
+                popUpTo(navController.graph.id) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
 
     val mainVideosFeedHoist = remember { VideosFeedHoist() }
 

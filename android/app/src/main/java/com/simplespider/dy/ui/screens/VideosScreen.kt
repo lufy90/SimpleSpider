@@ -42,6 +42,7 @@ import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.DyVideoDto
 import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.TokenStore
+import com.simplespider.dy.data.VideoListQueryParams
 import com.simplespider.dy.ui.VideosFeedHoist
 import com.simplespider.dy.ui.gestures.rememberSearchBarSwipeNestedConnection
 import kotlinx.coroutines.flow.debounce
@@ -78,8 +79,15 @@ fun VideosScreen(
         tokenStore.videoListRandomFlow.collect { feed.useRandomList = it }
     }
 
-    suspend fun randomQueryParam(): String? =
-        if (tokenStore.videoListRandomFlow.first()) "true" else null
+    suspend fun randomQueryParamForList(): String? =
+        when {
+            authorId != null -> null
+            tokenStore.videoListRandomFlow.first() -> "true"
+            else -> null
+        }
+
+    suspend fun videoListFiltersForRequest(): VideoListQueryParams =
+        if (authorId == null) tokenStore.readVideoListQueryParams() else VideoListQueryParams()
 
     fun resetAndLoad() {
         scope.launch {
@@ -88,13 +96,13 @@ fun VideosScreen(
             feed.page = 1
             feed.items.clear()
             try {
-                val q = tokenStore.readVideoListQueryParams()
+                val q = videoListFiltersForRequest()
                 val res = ApiClient.api.listVideos(
                     limit = 20,
                     page = 1,
                     search = feed.search.ifBlank { null },
                     authorId = authorId,
-                    random = randomQueryParam(),
+                    random = randomQueryParamForList(),
                     rate = q.rate,
                     minRate = q.minRate,
                     maxRate = q.maxRate,
@@ -116,16 +124,8 @@ fun VideosScreen(
 
     LaunchedEffect(authorId, tokenStore) {
         if (authorId != null) {
-            val currentQ = tokenStore.readVideoListQueryParams()
-            if (feed.items.isEmpty() || feed.querySnapshotForLoadedList != currentQ) {
-                resetAndLoad()
-            }
-            merge(
-                tokenStore.videoListRandomFlow.drop(1).map { },
-                tokenStore.videoListQueryParamsFlow.drop(1).map { },
-            ).collect {
-                resetAndLoad()
-            }
+            resetAndLoad()
+            return@LaunchedEffect
         } else {
             val currentQ = tokenStore.readVideoListQueryParams()
             val queryMismatch = feed.querySnapshotForLoadedList != currentQ
@@ -156,13 +156,13 @@ fun VideosScreen(
                 feed.loading = true
                 try {
                     val next = feed.page + 1
-                    val q = tokenStore.readVideoListQueryParams()
+                    val q = videoListFiltersForRequest()
                     val res = ApiClient.api.listVideos(
                         limit = 20,
                         page = next,
                         search = feed.search.ifBlank { null },
                         authorId = authorId,
-                        random = randomQueryParam(),
+                        random = randomQueryParamForList(),
                         rate = q.rate,
                         minRate = q.minRate,
                         maxRate = q.maxRate,
@@ -215,7 +215,7 @@ fun VideosScreen(
                             video = video,
                             onOpen = {
                                 scope.launch {
-                                    val q = tokenStore.readVideoListQueryParams()
+                                    val q = videoListFiltersForRequest()
                                     val playable = feed.items.filter { !it.playSrc.isNullOrBlank() }
                                     val idx = playable.indexOfFirst { it.id == video.id }
                                     if (idx >= 0) {
@@ -225,7 +225,7 @@ fun VideosScreen(
                                             remoteTotal = feed.total,
                                             search = feed.search.ifBlank { null },
                                             authorId = authorId,
-                                            useRandomList = feed.useRandomList,
+                                            useRandomList = authorId == null && feed.useRandomList,
                                             query = q,
                                         )
                                         onVideoClick(video, playable, idx, pagination)
