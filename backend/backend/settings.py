@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'django_filters',
     'system',
     'dyvideo',
+    'debug_toolbar',
 ]
 
 MIDDLEWARE = [
@@ -58,10 +59,13 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
 ]
 
 ROOT_URLCONF = 'backend.urls'
-
+INTERNAL_IPS = [
+    '127.0.0.1',
+]
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -107,7 +111,7 @@ DATABASES = {
         "NAME": "simplespider",
         "USER": "simplespider",
         "PASSWORD": "password",
-        "HOST": "192.168.1.101",
+        "HOST": "192.168.1.137",
         "PORT": "5432",
     },
 }

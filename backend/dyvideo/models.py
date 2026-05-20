@@ -46,6 +46,12 @@ class DyAuthor(models.Model):
     class Meta:
         db_table = 'dyauthor'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(
+                fields=['-created_at', '-id'],
+                name='dyauthor_created_id_desc_idx',
+            ),
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.unique_id})"
@@ -60,6 +66,7 @@ class DyVideo(models.Model):
     name = models.CharField(max_length=255, default="")
     vid = models.CharField(max_length=255, unique=True, null=True, blank=True, db_index=True)
     author = models.ForeignKey(DyAuthor, on_delete=models.CASCADE, related_name='videos', null=True, blank=True)
+    ## These author fields are different from author instance fields, these are parsed from video info.
     author_unique_id = models.CharField(max_length=255, default="")
     author_uid = models.CharField(max_length=255, default="")
     author_name = models.CharField(max_length=255, default="")
@@ -78,6 +85,12 @@ class DyVideo(models.Model):
     class Meta:
         db_table = 'dyvideo'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(
+                fields=['-created_at', '-id'],
+                name='dyvideo_created_id_desc_idx',
+            ),
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.vid})"
@@ -141,6 +154,7 @@ class Task(models.Model):
         indexes = [
             models.Index(fields=['status', 'priority']),
             models.Index(fields=['task_type', 'status']),
+            models.Index(fields=['created_at'], name='task_created_at_idx'),
         ]
     
     def __str__(self):

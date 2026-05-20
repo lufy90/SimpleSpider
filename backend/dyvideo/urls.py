@@ -9,8 +9,9 @@ router = DefaultRouter()
 router.register(r'author', views.DyAuthorView, basename='author')
 router.register(r'video', views.DyVideoView, basename='video')
 router.register(r'task', views.TaskView, basename='task')
+router.register(r'author-view', views.DyAuthorCursorView, basename='author-cursor')
+router.register(r'video-view', views.DyVideoCursorView, basename='video-cursor')
 
 urlpatterns = [
-    # Include router URLs (includes all CRUD + custom actions)
     path('', include(router.urls)),
 ]
