@@ -326,7 +326,18 @@ def response_handler(res: Response, exp_urls: List[str], **kwargs) -> Dict[str, 
             try:
                 res_json = res.json()
             except Exception as e:
-                logger.warning("response_handler: res.json() failed for %s: %s", res.url[:80], e)
+                logger.error("response_handler: res.json() failed for %s: %s", res.url, e)
+                logger.warning("response_handler: res.text: %s", res.text())
+                logger.warning("response_handler: res.status: %s", res.status)
+                logger.warning("response_handler: res.headers: %s", res.headers)
+                logger.warning("response_handler: res.request.headers: %s", res.request.headers)
+                logger.warning("response_handler: res.request.method: %s", res.request.method)
+                logger.warning("response_handler: res.request.url: %s", res.request.url)
+                # logger.warning("response_handler: res.request.body: %s", res.request.body)
+                # logger.warning("response_handler: res.request.body_bytes: %s", res.request.body_bytes)
+                # logger.warning("response_handler: res.request.body_bytes_io: %s", res.request.body_bytes_io)
+                # logger.warning("response_handler: res.request.body_io: %s", res.request.body_io)
+                #breakpoint()
                 return None
             logger.debug("expected url: %s", url)
             q.put({"url": url, "json": res_json, **kwargs})

@@ -9,10 +9,15 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import DyAuthor, DyVideo, Task, TaskType
 from .serializers import (
-    DyAuthorSerializer, DyVideoSerializer, CrawlSerializer, 
-    DyVideoDownloadSerializer, TaskSerializer, CrawlByUrlSerializer,
-    CrawlAllSerializer
+    DyAuthorSerializer,
+    DyVideoSerializer,
+    CrawlSerializer,
+    DyVideoDownloadSerializer,
+    TaskSerializer,
+    CrawlByUrlSerializer,
+    CrawlAllSerializer,
 )
+from .pagination import DyCursorPagination
 from .task_manager import task_manager
 
 
@@ -25,7 +30,6 @@ class DyAuthorView(ModelViewSet):
     filterset_fields = ['rate', 'status', 'is_valid', 'is_favor']
     search_fields = ['name', 'desc', 'unique_id', 'path', 'url', 'uid', 'used_names', 'signature_sec_uid']
     ordering_fields = ['created_at', 'updated_at', 'rate', 'name']
-    ordering = ['-created_at']
     
     def get_queryset(self):
         return DyAuthor.objects.all()
@@ -127,7 +131,6 @@ class DyVideoView(ModelViewSet):
     ]
     search_fields = ['name', 'desc', 'author_name', 'path']
     ordering_fields = ['created_at', 'updated_at', 'rate', 'name']
-    ordering = ['-created_at']
 
     def _is_random_request(self):
         value = (self.request.query_params.get('random') or '').strip().lower()
@@ -243,6 +246,18 @@ class DyVideoView(ModelViewSet):
             })
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DyAuthorCursorView(DyAuthorView):
+    """Cursor-paginated authors: list/detail use read serializer; writes use full serializer."""
+
+    pagination_class = DyCursorPagination
+
+
+class DyVideoCursorView(DyVideoView):
+    """Cursor-paginated videos: list/detail use read serializer; writes use full serializer."""
+
+    pagination_class = DyCursorPagination
 
 
 class TaskView(ModelViewSet):

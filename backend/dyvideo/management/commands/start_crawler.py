@@ -17,7 +17,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--max-concurrent-tasks',
             type=int,
-            default=2,
+            default=1,
             help='Maximum number of concurrent tasks to process (default: 2)'
         )
 

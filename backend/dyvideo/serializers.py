@@ -25,12 +25,19 @@ class DyAuthorSerializer(serializers.ModelSerializer):
         else:
             return f"{settings.MEDIA_URL}{avatar_path}"
 
+class SimpleAuthorSerializer(DyAuthorSerializer):
+    """Serializer for DyAuthor model"""
+    
+    class Meta:
+        model = DyAuthor
+        fields = ['id', 'name', 'path', 'url', 'unique_id', 'avatar_src']
 
 class DyVideoSerializer(serializers.ModelSerializer):
     """Serializer for DyVideo model"""
     cover_src = serializers.SerializerMethodField()
     play_src = serializers.SerializerMethodField()
     author_avatar_src = serializers.SerializerMethodField()
+#    author = SimpleAuthorSerializer(read_only=True)
 
     class Meta:
         model = DyVideo

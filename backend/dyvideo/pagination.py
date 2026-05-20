@@ -1,4 +1,16 @@
-from rest_framework.pagination import PageNumberPagination
+from rest_framework.pagination import CursorPagination, PageNumberPagination
+
+
+class DyCursorPagination(CursorPagination):
+    """
+    Cursor-based pagination for author/video collection list.
+    Stable ordering: created_at then id (tie-break).
+    """
+
+    page_size = 20
+    page_size_query_param = "limit"
+    max_page_size = 200
+    ordering = "-created_at", "-id"
 
 
 class CustomPageNumberPagination(PageNumberPagination):
