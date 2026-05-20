@@ -3,7 +3,7 @@
  * Add entries for each IP/host you use to access the frontend.
  */
 export const HOST_TO_APIDOMAIN = {
-  localhost: '192.168.1.134:8003',
+  'localhost': '192.168.1.134:8003',
   '127.0.0.1': '192.168.1.134:8003',
   '192.168.1.137': '192.168.1.137:8000',
   '10.0.1.137': '10.0.1.137:8000',
