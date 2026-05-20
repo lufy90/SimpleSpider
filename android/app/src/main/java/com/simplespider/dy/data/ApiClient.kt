@@ -33,6 +33,21 @@ object ApiClient {
         chain.proceed(req)
     }
 
+    private val unauthorizedInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        val response = chain.proceed(request)
+        if (response.code != 401) return@Interceptor response
+
+        val path = request.url.encodedPath
+        val isLoginRequest = request.method.equals("POST", ignoreCase = true) &&
+            (path.endsWith("/token/") || path.endsWith("/token"))
+        if (!isLoginRequest) {
+            AuthTokenHolder.setToken(null)
+            UnauthorizedSessionHandler.notifyUnauthorized()
+        }
+        response
+    }
+
     private val logging = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BASIC
     }
@@ -42,6 +57,7 @@ object ApiClient {
         .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .addInterceptor(authInterceptor)
+        .addInterceptor(unauthorizedInterceptor)
         .addInterceptor(logging)
         .build()
 
