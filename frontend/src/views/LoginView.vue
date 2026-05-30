@@ -6,6 +6,9 @@
           <span>Login</span>
         </div>
       </template>
+      <div class="login-brand">
+        <img src="/favicon.svg" alt="SimpleSpider" class="login-logo" />
+      </div>
       <el-form :model="loginForm" :rules="rules" ref="loginFormRef" label-width="80px">
         <el-form-item label="Username" prop="username">
           <el-input v-model="loginForm.username" placeholder="Enter username" />
@@ -94,6 +97,18 @@ const handleLogin = async () => {
 
 .login-card :deep(.el-button) {
   width: 100%;
+}
+
+.login-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.login-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
 }
 
 .card-header {

@@ -103,7 +103,7 @@
                   <img :src="defaultCover" class="cover-img" />
                 </template>
               </el-image>
-              <span class="name-text" @click="openVideo(scope.row)" style="cursor: pointer">
+              <span class="name-text" @click="openVideoPreview(scope.row, scope.$index)" style="cursor: pointer">
                 {{ scope.row.name }}
               </span>
             </div>
@@ -148,7 +148,7 @@
         </el-table-column>
         <el-table-column
           :label="isMobile ? 'A' : 'Action'"
-          :min-width="isMobile ? 40 : 120"
+          :min-width="isMobile ? 40 : 150"
           :width="isMobile ? 40 : undefined"
           align="center"
           :fixed="isMobile ? false : 'right'"
@@ -186,12 +186,12 @@
       </el-table>
       <div v-else class="grid-view" :style="'height: ' + tableHeight">
         <div 
-          v-for="item in tableData" 
+          v-for="(item, index) in tableData" 
           :key="item.id" 
           class="grid-item"
           :class="{ 'grid-item-selected': batchSelections.includes(item.id) }"
         >
-          <div class="grid-item-image-wrapper" @click="openVideo(item)">
+          <div class="grid-item-image-wrapper" @click="openVideoPreview(item, index)">
             <el-image :src="item.cover_src || defaultCover" class="grid-item-image" fit="cover">
               <template #error>
                 <img :src="defaultCover" class="grid-item-image" />
@@ -271,17 +271,28 @@
         </el-descriptions-item>
       </el-descriptions>
     </el-drawer>
+    <VideoPreview
+      :visible="videoPreviewVisible"
+      :videos="previewVideos"
+      :initial-index="videoPreviewInitialIndex"
+      :has-more="previewHasMore"
+      :loading-more="isLoadingPreviewMore"
+      :total-count="total"
+      @close="videoPreviewVisible = false"
+      @load-more="onPreviewLoadMore"
+    />
   </div>
 </template>
 
 <script setup>
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Star, StarFilled, InfoFilled, Delete, Download, Grid, List, MoreFilled, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { Star, StarFilled, InfoFilled, Delete, Download, Grid, List, MoreFilled, TopRight, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { ajax } from '@/utils/request'
 import { timeOption } from '@/config'
+import VideoPreview from '@/components/VideoPreview.vue'
 
 const defaultCover = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="20" height="20"%3E%3Crect width="20" height="20" fill="%23ddd"/%3E%3C/svg%3E'
 
@@ -318,6 +329,14 @@ const viewStyle = ref('list')
 const tableHeight = ref(500)
 const isMobile = ref(false)
 const mobileFiltersExpanded = ref(false)
+
+const videoPreviewVisible = ref(false)
+const videoPreviewInitialIndex = ref(0)
+const previewVideos = ref([])
+const previewPage = ref(1)
+const isLoadingPreviewMore = ref(false)
+
+const previewHasMore = computed(() => previewVideos.value.length < total.value)
 
 const updateMobileState = () => {
   isMobile.value = window.innerWidth <= 900
@@ -356,14 +375,43 @@ const getTableHeight = () => {
   }
 }
 
-const openVideo = (data) => {
+const openVideoInNewTab = (data) => {
   if (data.play_src) {
     window.open(data.play_src, '_blank')
+  } else {
+    ElMessage.warning('No playable source')
+  }
+}
+
+const openVideoPreview = (data, index) => {
+  previewVideos.value = [...tableData.value]
+  previewPage.value = currentPage.value
+  videoPreviewInitialIndex.value = typeof index === 'number' ? index : tableData.value.findIndex((v) => v.id === data.id)
+  if (videoPreviewInitialIndex.value < 0) videoPreviewInitialIndex.value = 0
+  videoPreviewVisible.value = true
+}
+
+const onPreviewLoadMore = async () => {
+  if (isLoadingPreviewMore.value || !previewHasMore.value) return
+  isLoadingPreviewMore.value = true
+  const nextPage = previewPage.value + 1
+  try {
+    const params = { ...searchForm.value, page: nextPage }
+    const res = await ajax.get('/dy/video/', params)
+    let data = res.data.results || res.data
+    if (Array.isArray(data) && data.length > 0) {
+      data.forEach((x) => dataTransfer(x))
+      previewVideos.value = [...previewVideos.value, ...data]
+      previewPage.value = nextPage
+    }
+  } catch (error) {
+    ElMessage.error('Failed to load more videos')
+  } finally {
+    isLoadingPreviewMore.value = false
   }
 }
 
 const openAuthorVideos = (data) => {
-  console.log('data:',data)
   if (data.author) {
     router.push({
       name: 'dyauthor-detail',
@@ -388,6 +436,7 @@ const changeFavor = (data) => {
 
 const operations = ref([
   { label: 'Detail', flag: 'detail', icon: InfoFilled },
+  { label: 'Open in New Tab', flag: 'open_tab', icon: TopRight },
   { label: 'Delete', flag: 'delete', icon: Delete },
   { label: 'Download', flag: 'download', icon: Download },
 ])
@@ -413,6 +462,8 @@ const showDrawerFn = (item, flag) => {
 const actionFn = (data, flag) => {
   if (flag == 'detail') {
     showDrawerFn(data, 'Detail')
+  } else if (flag == 'open_tab') {
+    openVideoInNewTab(data)
   } else if (flag == 'delete') {
     ElMessageBox.confirm(
       'Delete ' + "<span style='font-weight: bold;color:red;'>" + data.name + '</span> ?',
