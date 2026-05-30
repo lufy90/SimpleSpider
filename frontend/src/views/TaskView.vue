@@ -123,7 +123,7 @@
         </el-table-column>
         <el-table-column
           :label="isMobile ? 'A' : 'Actions'"
-          :min-width="isMobile ? 40 : 100"
+          :min-width="isMobile ? 40 : 130"
           :width="isMobile ? 40 : undefined"
           :fixed="isMobile ? false : 'right'"
           align="center"
@@ -138,6 +138,13 @@
                   <el-dropdown-item @click="copyTask(scope.row)">
                     <el-icon><DocumentCopy /></el-icon>
                     <span style="margin-left: 6px">Copy</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    @click="resetTask(scope.row)"
+                    :disabled="resettingTaskId === scope.row.id"
+                  >
+                    <el-icon><RefreshRight /></el-icon>
+                    <span style="margin-left: 6px">{{ resettingTaskId === scope.row.id ? 'Resetting...' : 'Reset' }}</span>
                   </el-dropdown-item>
                   <el-dropdown-item @click="onTaskAction(scope.row, 'delete')">
                     <el-icon><Delete /></el-icon>
@@ -154,6 +161,16 @@
                 icon="DocumentCopy"
                 @click.stop="copyTask(scope.row)"
                 title="Copy task"
+              />
+              <el-button
+                type="warning"
+                link
+                size="small"
+                icon="RefreshRight"
+                :loading="resettingTaskId === scope.row.id"
+                :disabled="resettingTaskId === scope.row.id"
+                @click.stop="resetTask(scope.row)"
+                title="Reset task"
               />
               <el-button
                 type="danger"
@@ -352,7 +369,7 @@
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, DocumentCopy, MoreFilled, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { Delete, DocumentCopy, MoreFilled, RefreshRight, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { ajax } from '@/utils/request'
 import { timeOption } from '@/config'
 
@@ -412,6 +429,7 @@ const crawlAllLoading = ref(false)
 const crawlAllFormRef = ref(null)
 
 const batchSelections = ref([])
+const resettingTaskId = ref(null)
 const batchOptions = ref([
   { label: 'Batch Delete', value: 'delete' },
 ])
@@ -841,6 +859,32 @@ const deleteTask = (row) => {
         ElMessage.error('Failed to delete task')
       })
   }).catch(() => {})
+}
+
+const resetTask = (row) => {
+  const rawType = row.originalTaskType || row.task_type
+  if (rawType !== 'crawl_authors') {
+    ElMessage.warning('Reset is only available for Crawl Authors tasks')
+    return
+  }
+  if (resettingTaskId.value === row.id) return
+  resettingTaskId.value = row.id
+  ajax.patch(`/dy/task/${row.id}/`, { status: 'pending', is_rerun: true })
+    .then(() => {
+      ElMessage.success('Task reset to pending')
+      getData()
+      if (drawerVisible.value && selectedTask.value?.id === row.id) {
+        handleRowClick(row)
+      }
+    })
+    .catch(() => {
+      ElMessage.error('Failed to reset task')
+    })
+    .finally(() => {
+      if (resettingTaskId.value === row.id) {
+        resettingTaskId.value = null
+      }
+    })
 }
 
 const onTaskAction = (row, action) => {

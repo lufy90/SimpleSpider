@@ -47,17 +47,19 @@
           </div>
 
           <button
-            v-if="hasNext"
+            v-if="showNextControl"
             type="button"
             class="video-preview-arrow video-preview-arrow-right"
             aria-label="Next"
+            :disabled="loadingMore && atLoadedEnd"
             @click.stop="goNext"
           >
-            <el-icon :size="32"><ArrowRight /></el-icon>
+            <el-icon v-if="loadingMore && atLoadedEnd" :size="32" class="is-loading"><Loading /></el-icon>
+            <el-icon v-else :size="32"><ArrowRight /></el-icon>
           </button>
 
-          <div v-if="videos.length > 1" class="video-preview-counter">
-            {{ currentIndex + 1 }} / {{ videos.length }}
+          <div v-if="videos.length > 0" class="video-preview-counter">
+            {{ currentIndex + 1 }} / {{ displayTotal }}
           </div>
         </div>
       </div>
@@ -67,30 +69,60 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Close, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { Close, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
   videos: { type: Array, default: () => [] },
   initialIndex: { type: Number, default: 0 },
+  hasMore: { type: Boolean, default: false },
+  loadingMore: { type: Boolean, default: false },
+  totalCount: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'load-more'])
 
 const videoRef = ref(null)
 const currentIndex = ref(0)
+const waitingForMore = ref(false)
+
+const clampIndex = (index) => {
+  const max = Math.max(0, props.videos.length - 1)
+  return Math.min(Math.max(0, index), max)
+}
 
 const currentVideo = computed(() => {
   const list = props.videos
   if (!list.length) return null
-  const idx = Math.max(0, Math.min(currentIndex.value, list.length - 1))
-  return list[idx]
+  return list[clampIndex(currentIndex.value)]
 })
 
-const hasPrev = computed(() => props.videos.length > 1 && currentIndex.value > 0)
-const hasNext = computed(() =>
-  props.videos.length > 1 && currentIndex.value < props.videos.length - 1
+const atLoadedEnd = computed(
+  () => props.videos.length > 0 && currentIndex.value >= props.videos.length - 1
 )
+
+const hasPrev = computed(() => props.videos.length > 1 && currentIndex.value > 0)
+
+const hasNextInList = computed(
+  () => props.videos.length > 1 && currentIndex.value < props.videos.length - 1
+)
+
+const hasNext = computed(() => hasNextInList.value || props.hasMore)
+
+const showNextControl = computed(() => props.videos.length > 1 || props.hasMore)
+
+const displayTotal = computed(() => {
+  if (props.totalCount > 0) return props.totalCount
+  return props.videos.length
+})
+
+function maybePrefetch() {
+  if (!props.hasMore || props.loadingMore || props.videos.length === 0) return
+  const prefetchFrom = Math.max(0, props.videos.length - 2)
+  if (currentIndex.value >= prefetchFrom) {
+    emit('load-more')
+  }
+}
 
 function goPrev() {
   if (!hasPrev.value) return
@@ -98,16 +130,24 @@ function goPrev() {
 }
 
 function goNext() {
-  if (!hasNext.value) return
-  currentIndex.value++
+  if (hasNextInList.value) {
+    currentIndex.value++
+    maybePrefetch()
+    return
+  }
+  if (props.hasMore && !props.loadingMore) {
+    waitingForMore.value = true
+    emit('load-more')
+  }
 }
 
 function handleClose() {
+  waitingForMore.value = false
   emit('close')
 }
 
 function onVideoEnded() {
-  if (hasNext.value) {
+  if (hasNextInList.value || props.hasMore) {
     goNext()
   }
 }
@@ -118,13 +158,13 @@ function onKeydown(e) {
     handleClose()
     return
   }
-  if (props.videos.length <= 1) return
+  if (props.videos.length <= 1 && !props.hasMore) return
   if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
     e.preventDefault()
     if (hasPrev.value) goPrev()
   } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     e.preventDefault()
-    if (hasNext.value) goNext()
+    if (hasNext.value && !(props.loadingMore && atLoadedEnd.value)) goNext()
   }
 }
 
@@ -132,13 +172,13 @@ watch(
   () => props.visible,
   (v) => {
     if (v) {
-      currentIndex.value = Math.min(
-        Math.max(0, props.initialIndex),
-        Math.max(0, props.videos.length - 1)
-      )
+      currentIndex.value = clampIndex(props.initialIndex)
+      waitingForMore.value = false
       document.addEventListener('keydown', onKeydown)
       document.body.style.overflow = 'hidden'
+      maybePrefetch()
     } else {
+      waitingForMore.value = false
       document.removeEventListener('keydown', onKeydown)
       document.body.style.overflow = ''
     }
@@ -146,13 +186,30 @@ watch(
 )
 
 watch(
-  () => [props.initialIndex, props.videos.length],
-  () => {
-    if (props.visible) {
-      currentIndex.value = Math.min(
-        Math.max(0, props.initialIndex),
-        Math.max(0, props.videos.length - 1)
-      )
+  () => props.videos.length,
+  (newLen, oldLen) => {
+    if (!props.visible) return
+    if (newLen < oldLen) {
+      currentIndex.value = clampIndex(currentIndex.value)
+      return
+    }
+    if (newLen > oldLen) {
+      if (waitingForMore.value) {
+        waitingForMore.value = false
+        if (currentIndex.value < newLen - 1) {
+          currentIndex.value++
+        }
+      }
+      maybePrefetch()
+    }
+  }
+)
+
+watch(
+  () => props.loadingMore,
+  (loading, prev) => {
+    if (prev && !loading && waitingForMore.value) {
+      waitingForMore.value = false
     }
   }
 )
@@ -228,6 +285,17 @@ watch(
 }
 .video-preview-arrow:hover {
   background: rgba(255, 255, 255, 0.35);
+}
+.video-preview-arrow:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+.video-preview-arrow .is-loading {
+  animation: video-preview-spin 1s linear infinite;
+}
+@keyframes video-preview-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 .video-preview-arrow-left {
   left: 24px;

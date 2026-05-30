@@ -68,8 +68,8 @@
         <span>Videos <span v-if="videoTotal > 0" style="font-weight: normal; color: #909399;">({{ videoTotal }})</span></span>
       </div>
       <div v-loading="isLoadingVideos" class="videos-grid" ref="videosGridRef">
-        <div v-for="(item, index) in videoData" class="grid-item" :key="item.id" @click="openVideo(item, index)">
-          <div class="grid-item-image-wrapper">
+        <div v-for="(item, index) in videoData" class="grid-item" :key="item.id">
+          <div class="grid-item-image-wrapper" @click="openVideo(item, index)">
             <el-image class="grid-item-icon" :src="item.cover_src || defaultCover" fit="cover">
               <template #error>
                 <img :src="defaultCover" class="grid-item-icon" />
@@ -78,6 +78,25 @@
             <div class="grid-item-name-overlay">
               <div class="grid-item-created-at">{{ item.createdAt || '-' }}</div>
               <div class="grid-item-name">{{ item.name }}</div>
+            </div>
+            <div class="grid-item-hover-actions" @click.stop>
+              <el-dropdown trigger="click" placement="bottom-end">
+                <span class="grid-item-more-trigger">
+                  <el-icon><MoreFilled /></el-icon>
+                </span>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item
+                      v-for="op in operations"
+                      :key="op.flag"
+                      @click="actionFn(item, op.flag)"
+                    >
+                      <el-icon><component :is="op.icon"></component></el-icon>
+                      <span style="margin-left: 5px">{{ op.label }}</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
           <div class="grid-item-actions">
@@ -100,16 +119,28 @@
       :visible="videoPreviewVisible"
       :videos="videoData"
       :initial-index="videoPreviewInitialIndex"
+      :has-more="hasMore"
+      :loading-more="isLoadingMore"
+      :total-count="videoTotal"
       @close="videoPreviewVisible = false"
+      @load-more="onPreviewLoadMore"
     />
+    <el-drawer v-model="drawer" :title="drawerTitle">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item v-for="(v, k) in drawerContent" :label="k" :key="k">
+          <el-link v-if="k === 'Play URL' && v && v !== '-'" :href="v" type="primary" target="_blank">{{ v }}</el-link>
+          <span v-else>{{ v }}</span>
+        </el-descriptions-item>
+      </el-descriptions>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Star, StarFilled } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Star, StarFilled, InfoFilled, Delete, Download, MoreFilled } from '@element-plus/icons-vue'
 import { ajax } from '@/utils/request'
 import { timeOption } from '@/config'
 import VideoPreview from '@/components/VideoPreview.vue'
@@ -151,6 +182,16 @@ const hasMore = ref(true)
 const isLoadingMore = ref(false)
 const videoPreviewVisible = ref(false)
 const videoPreviewInitialIndex = ref(0)
+
+const drawer = ref(false)
+const drawerContent = ref({})
+const drawerTitle = ref('')
+
+const operations = ref([
+  { label: 'Detail', flag: 'detail', icon: InfoFilled },
+  { label: 'Delete', flag: 'delete', icon: Delete },
+  { label: 'Download', flag: 'download', icon: Download },
+])
 
 const statusOptions = {
   ready: 'Ready',
@@ -294,6 +335,12 @@ const openVideo = (data, index) => {
   videoPreviewVisible.value = true
 }
 
+const onPreviewLoadMore = () => {
+  if (isLoadingMore.value || !hasMore.value) return
+  currentPage.value++
+  getVideoData(true)
+}
+
 const changeVideoRate = (data) => {
   ajax.patch(`/dy/video/${data.id}/`, { rate: data.rate }).catch((err) => {
     ElMessage.error('Failed to update rate')
@@ -308,6 +355,56 @@ const changeVideoFavor = (data) => {
   })
 }
 
+const showDrawerFn = (item, flag) => {
+  drawer.value = true
+  drawerContent.value = {
+    Name: item.name,
+    ID: item.id,
+    'Author Name': item.author_name || authorData.value?.name || '-',
+    'Author ID': item.author || authorData.value?.id || '-',
+    Path: item.path || '-',
+    'Play URL': item.play_src || '-',
+    Rate: item.rate || 0,
+    'Is Like': item.is_like ? 'Yes' : 'No',
+    Favor: item.is_favor ? 'Yes' : 'No',
+    'Created At': item.createdAt || '-',
+    'Updated At': item.updatedAt || '-',
+  }
+  drawerTitle.value = `${flag} of ${item.name}`
+}
+
+const actionFn = (data, flag) => {
+  if (flag === 'detail') {
+    showDrawerFn(data, 'Detail')
+  } else if (flag === 'delete') {
+    ElMessageBox.confirm(
+      'Delete ' + "<span style='font-weight: bold;color:red;'>" + data.name + '</span> ?',
+      'Warning',
+      {
+        closeOnClickModal: false,
+        dangerouslyUseHTMLString: true,
+        type: 'warning',
+      },
+    ).then(() => {
+      ajax
+        .delete(`/dy/video/${data.id}/`)
+        .then(() => {
+          ElMessage.success(`${data.name} deleted`)
+          videoData.value = videoData.value.filter((v) => v.id !== data.id)
+          videoTotal.value = Math.max(0, videoTotal.value - 1)
+        })
+        .catch(() => {
+          ElMessage.error('Failed to delete')
+        })
+    }).catch(() => {})
+  } else if (flag === 'download') {
+    ajax.post('/dy/video/download/', { ids: [data.id] }).then((res) => {
+      ElMessage.success(res.data.msg || 'Download started')
+    }).catch(() => {
+      ElMessage.error('Failed to start download')
+    })
+  }
+}
 
 onMounted(() => {
   getAuthorData()
@@ -453,6 +550,37 @@ watch(() => route.params.id, () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.grid-item-hover-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.grid-item:hover .grid-item-hover-actions {
+  opacity: 1;
+}
+
+.grid-item-more-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  font-size: 18px;
+  transition: background 0.2s;
+}
+
+.grid-item-more-trigger:hover {
+  background: rgba(0, 0, 0, 0.75);
 }
 
 .grid-item-actions {
