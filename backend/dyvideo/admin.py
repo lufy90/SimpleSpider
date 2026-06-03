@@ -34,7 +34,7 @@ class DyAuthorAdmin(admin.ModelAdmin):
 @admin.register(DyVideo)
 class DyVideoAdmin(admin.ModelAdmin):
     """Admin configuration for DyVideo model"""
-    list_display = ['name', 'vid', 'author_name', 'rate', 'is_favor', 'valid', 'created_at']
+    list_display = ['name', 'vid', 'author_name', 'rate', 'is_favor', 'valid', 'create_time', 'created_at']
     list_filter = ['is_like', 'is_favor', 'valid', 'created_at']
     search_fields = ['name', 'vid', 'author_name', 'author_uid', 'desc']
     ordering = ['-created_at']
@@ -54,7 +54,7 @@ class DyVideoAdmin(admin.ModelAdmin):
             'fields': ('rate', 'is_like', 'is_favor', 'valid')
         }),
         ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
+            'fields': ('create_time', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
