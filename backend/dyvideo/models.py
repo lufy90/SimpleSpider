@@ -75,6 +75,7 @@ class DyVideo(models.Model):
     desc = models.TextField(blank=True, default="")
     origin_url = models.CharField(max_length=2000, default="")
     cover_url = models.CharField(max_length=2000, default="")
+    create_time = models.DateTimeField(null=True, blank=True, help_text="Video publish time from Douyin")
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_dyvideos', null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)

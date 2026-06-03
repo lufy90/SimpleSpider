@@ -14,6 +14,7 @@ from threading import Thread
 from django.contrib.auth.models import User
 from .models import Task
 from django.db import close_old_connections
+from datetime import datetime, timezone as dt_timezone
 
 
 
@@ -254,6 +255,11 @@ def format_video_data(api_data: Dict[str, Any], author=None, video_path: str = N
     # Handle boolean fields
     formatted['is_like'] = api_data.get('user_digged', False)
     formatted['is_favor'] = api_data.get('collect_stat', False)
+
+    if 'create_time' in api_data and api_data['create_time']:
+        formatted['create_time'] = datetime.fromtimestamp(
+            int(api_data['create_time']), tz=dt_timezone.utc
+        )
     
     return formatted
 
@@ -758,13 +764,18 @@ def save_data(item:dict={}):
             try:
                 video = DyVideo.objects.filter(vid=vid).first()
                 if video:
-                    # update video urls
+                    update_fields = []
                     if not video.valid:
                         video.origin_url = video_data.get("origin_url")
                         video.cover_url = video_data.get("cover_url")
                         # Ensure video is pending for independent download worker.
                         video.status = Status.WAITING
-                        video.save()
+                        update_fields.extend(["origin_url", "cover_url", "status"])
+                    if video_data.get("create_time") and not video.create_time:
+                        video.create_time = video_data["create_time"]
+                        update_fields.append("create_time")
+                    if update_fields:
+                        video.save(update_fields=update_fields + ["updated_at"])
                 else:
                     # Set status explicitly to avoid relying on implicit defaults.
                     # This prevents NOT NULL issues if incoming payload contains empty status.
