@@ -1,5 +1,6 @@
 package com.simplespider.dy.data
 
+import com.google.gson.annotations.JsonAdapter
 import com.google.gson.annotations.SerializedName
 
 data class LoginRequest(
@@ -16,12 +17,16 @@ data class RatePatchBody(
 )
 
 data class PagedAuthors(
-    val count: Int,
+    val count: Int = 0,
+    val next: String? = null,
+    val previous: String? = null,
     val results: List<DyAuthorDto>?,
 )
 
 data class PagedVideos(
-    val count: Int,
+    val count: Int = 0,
+    val next: String? = null,
+    val previous: String? = null,
     val results: List<DyVideoDto>?,
 )
 
@@ -52,4 +57,6 @@ data class DyVideoDto(
     @SerializedName("is_like") val isLike: Boolean?,
     @SerializedName("is_favor") val isFavor: Boolean?,
     @SerializedName("author_avatar_src") val authorAvatarSrc: String? = null,
+    @JsonAdapter(FlexibleDateTimeAdapter::class)
+    @SerializedName("create_time") val createTime: String? = null,
 )

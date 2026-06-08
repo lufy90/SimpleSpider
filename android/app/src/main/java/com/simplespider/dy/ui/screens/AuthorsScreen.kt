@@ -40,6 +40,8 @@ import coil.compose.AsyncImage
 import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.DyAuthorDto
 import com.simplespider.dy.data.RatePatchBody
+import com.simplespider.dy.data.cursorFromPaginationLink
+import com.simplespider.dy.data.hasMoreFromPaginationLink
 import com.simplespider.dy.ui.components.RateStarsRow
 import com.simplespider.dy.ui.gestures.rememberSearchBarSwipeNestedConnection
 import kotlinx.coroutines.flow.debounce
@@ -68,24 +70,92 @@ fun AuthorsScreen(
         onHide = { state.showSearchBar = false },
     )
 
+    fun applyPaginationLinks(next: String?, previous: String?) {
+        state.nextCursor = cursorFromPaginationLink(next)
+        state.previousCursor = cursorFromPaginationLink(previous)
+        state.hasMore = hasMoreFromPaginationLink(next)
+        state.hasPrevious = hasMoreFromPaginationLink(previous)
+    }
+
     fun resetAndLoad() {
         scope.launch {
             state.loading = true
             state.error = null
-            state.page = 1
+            state.nextCursor = null
+            state.previousCursor = null
+            state.hasMore = false
+            state.hasPrevious = false
             state.items.clear()
             try {
                 val res = ApiClient.api.listAuthors(
                     limit = 20,
-                    page = 1,
+                    cursor = null,
                     search = state.search.ifBlank { null },
                 )
-                state.total = res.count
+                applyPaginationLinks(res.next, res.previous)
                 res.results?.let { state.items.addAll(it) }
             } catch (e: Exception) {
                 state.error = e.message
             } finally {
                 state.loading = false
+            }
+        }
+    }
+
+    fun loadMoreAuthors() {
+        scope.launch {
+            if (state.loadingMore || state.loading || !state.hasMore) return@launch
+            val cursor = state.nextCursor ?: return@launch
+            state.loadingMore = true
+            try {
+                val res = ApiClient.api.listAuthors(
+                    limit = 20,
+                    cursor = cursor,
+                    search = state.search.ifBlank { null },
+                )
+                val newItems = res.results.orEmpty().filter { n -> state.items.none { it.id == n.id } }
+                if (newItems.isNotEmpty()) {
+                    state.items.addAll(newItems)
+                }
+                applyPaginationLinks(res.next, res.previous)
+                if (res.results.isNullOrEmpty()) {
+                    state.hasMore = false
+                    state.nextCursor = null
+                }
+            } catch (_: Exception) {
+            } finally {
+                state.loadingMore = false
+            }
+        }
+    }
+
+    fun loadPreviousAuthors() {
+        scope.launch {
+            if (state.loadingPrevious || state.loading || !state.hasPrevious) return@launch
+            val cursor = state.previousCursor ?: return@launch
+            state.loadingPrevious = true
+            try {
+                val res = ApiClient.api.listAuthors(
+                    limit = 20,
+                    cursor = cursor,
+                    search = state.search.ifBlank { null },
+                )
+                val newItems = res.results.orEmpty().filter { n -> state.items.none { it.id == n.id } }
+                if (newItems.isNotEmpty()) {
+                    val added = newItems.size
+                    state.items.addAll(0, newItems)
+                    val first = listState.firstVisibleItemIndex
+                    val offset = listState.firstVisibleItemScrollOffset
+                    listState.scrollToItem(first + added, offset)
+                }
+                applyPaginationLinks(res.next, res.previous)
+                if (res.results.isNullOrEmpty()) {
+                    state.hasPrevious = false
+                    state.previousCursor = null
+                }
+            } catch (_: Exception) {
+            } finally {
+                state.loadingPrevious = false
             }
         }
     }
@@ -105,27 +175,15 @@ fun AuthorsScreen(
     LaunchedEffect(listState) {
         snapshotFlow {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last to state.items.size
-        }.collect { (lastVisible, size) ->
+            val first = listState.firstVisibleItemIndex
+            Triple(first, last, state.items.size)
+        }.collect { (firstVisible, lastVisible, size) ->
             if (size == 0 || state.loading) return@collect
-            if (lastVisible >= size - 3 && state.items.size < state.total) {
-                state.loading = true
-                try {
-                    val next = state.page + 1
-                    val res = ApiClient.api.listAuthors(
-                        limit = 20,
-                        page = next,
-                        search = state.search.ifBlank { null },
-                    )
-                    val newItems = res.results.orEmpty().filter { n -> state.items.none { it.id == n.id } }
-                    if (newItems.isNotEmpty()) {
-                        state.items.addAll(newItems)
-                        state.page = next
-                    }
-                } catch (_: Exception) {
-                } finally {
-                    state.loading = false
-                }
+            if (firstVisible <= 2 && state.hasPrevious && !state.loadingPrevious) {
+                loadPreviousAuthors()
+            }
+            if (lastVisible >= size - 3 && state.hasMore && !state.loadingMore) {
+                loadMoreAuthors()
             }
         }
     }
@@ -153,32 +211,53 @@ fun AuthorsScreen(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                items(state.items, key = { it.id }) { author ->
-                    AuthorRow(
-                        author = author,
-                        rateBusy = state.rateSavingId == author.id,
-                        onOpen = { onAuthorClick(author.id) },
-                        onRateChange = { newRate ->
-                            scope.launch {
-                                state.rateSavingId = author.id
-                                state.error = null
-                                try {
-                                    val updated = ApiClient.api.patchAuthor(author.id, RatePatchBody(newRate))
-                                    val i = state.items.indexOfFirst { it.id == author.id }
-                                    if (i >= 0) state.items[i] = updated
-                                } catch (e: Exception) {
-                                    state.error = e.message
-                                } finally {
-                                    state.rateSavingId = null
-                                }
+                    if (state.loadingPrevious) {
+                        item(key = "loading_previous") {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(Modifier.size(28.dp))
                             }
-                        },
-                    )
+                        }
+                    }
+                    items(state.items, key = { it.id }) { author ->
+                        AuthorRow(
+                            author = author,
+                            rateBusy = state.rateSavingId == author.id,
+                            onOpen = { onAuthorClick(author.id) },
+                            onRateChange = { newRate ->
+                                scope.launch {
+                                    state.rateSavingId = author.id
+                                    state.error = null
+                                    try {
+                                        val updated = ApiClient.api.patchAuthor(author.id, RatePatchBody(newRate))
+                                        val i = state.items.indexOfFirst { it.id == author.id }
+                                        if (i >= 0) state.items[i] = updated
+                                    } catch (e: Exception) {
+                                        state.error = e.message
+                                    } finally {
+                                        state.rateSavingId = null
+                                    }
+                                }
+                            },
+                        )
+                    }
+                    if (state.loadingMore) {
+                        item(key = "loading_more") {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(Modifier.size(28.dp))
+                            }
+                        }
+                    }
                 }
-                if (state.loading && state.items.isNotEmpty()) {
-                    item { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
-                }
-            }
             }
         }
         AnimatedVisibility(
