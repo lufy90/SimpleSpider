@@ -11,12 +11,13 @@ object PlayerPlaylistHolder {
         val authorId: Int?,
         val authorAvatarSrc: String?,
         val rate: Float? = null,
+        val createTime: String? = null,
     )
 
     data class PlaylistPagination(
         val limit: Int,
-        val nextPageToLoad: Int,
-        val remoteTotal: Int,
+        val nextCursor: String?,
+        val previousCursor: String?,
         val search: String?,
         val authorId: Int?,
         val useRandomList: Boolean,
@@ -46,6 +47,7 @@ object PlayerPlaylistHolder {
             authorId = v.author,
             authorAvatarSrc = avatar,
             rate = v.rate,
+            createTime = v.createTime?.trim()?.takeIf { it.isNotEmpty() },
         )
     }
 

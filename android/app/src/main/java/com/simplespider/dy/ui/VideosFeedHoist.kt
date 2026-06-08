@@ -14,10 +14,15 @@ import com.simplespider.dy.data.VideoListQueryParams
  */
 class VideosFeedHoist {
     var search by mutableStateOf("")
-    var page by mutableIntStateOf(1)
+    var nextCursor by mutableStateOf<String?>(null)
+    var previousCursor by mutableStateOf<String?>(null)
     val items = mutableStateListOf<DyVideoDto>()
-    var total by mutableIntStateOf(0)
+    var hasMore by mutableStateOf(false)
+    var hasPrevious by mutableStateOf(false)
+    var loadedCount by mutableIntStateOf(0)
     var loading by mutableStateOf(false)
+    var loadingMore by mutableStateOf(false)
+    var loadingPrevious by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var gridColumns by mutableIntStateOf(2)
     var showSearchBar by mutableStateOf(false)

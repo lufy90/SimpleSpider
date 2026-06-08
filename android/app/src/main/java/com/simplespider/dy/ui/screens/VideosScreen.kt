@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -43,6 +45,8 @@ import com.simplespider.dy.data.DyVideoDto
 import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.TokenStore
 import com.simplespider.dy.data.VideoListQueryParams
+import com.simplespider.dy.data.cursorFromPaginationLink
+import com.simplespider.dy.data.hasMoreFromPaginationLink
 import com.simplespider.dy.ui.VideosFeedHoist
 import com.simplespider.dy.ui.gestures.rememberSearchBarSwipeNestedConnection
 import kotlinx.coroutines.flow.debounce
@@ -89,17 +93,27 @@ fun VideosScreen(
     suspend fun videoListFiltersForRequest(): VideoListQueryParams =
         if (authorId == null) tokenStore.readVideoListQueryParams() else VideoListQueryParams()
 
+    fun applyPaginationLinks(next: String?, previous: String?) {
+        feed.nextCursor = cursorFromPaginationLink(next)
+        feed.previousCursor = cursorFromPaginationLink(previous)
+        feed.hasMore = hasMoreFromPaginationLink(next)
+        feed.hasPrevious = hasMoreFromPaginationLink(previous)
+    }
+
     fun resetAndLoad() {
         scope.launch {
             feed.loading = true
             feed.error = null
-            feed.page = 1
+            feed.nextCursor = null
+            feed.previousCursor = null
+            feed.hasMore = false
+            feed.hasPrevious = false
             feed.items.clear()
             try {
                 val q = videoListFiltersForRequest()
                 val res = ApiClient.api.listVideos(
                     limit = 20,
-                    page = 1,
+                    cursor = null,
                     search = feed.search.ifBlank { null },
                     authorId = authorId,
                     random = randomQueryParamForList(),
@@ -110,14 +124,95 @@ fun VideosScreen(
                     isFavor = q.isFavor,
                     status = q.status,
                 )
-                feed.total = res.count
-                onVideoCountUpdate?.invoke(res.count)
+                applyPaginationLinks(res.next, res.previous)
                 res.results?.let { feed.items.addAll(it) }
+                feed.loadedCount = feed.items.size
+                onVideoCountUpdate?.invoke(feed.loadedCount)
                 feed.querySnapshotForLoadedList = q
             } catch (e: Exception) {
                 feed.error = e.message
             } finally {
                 feed.loading = false
+            }
+        }
+    }
+
+    fun loadMoreVideos() {
+        scope.launch {
+            if (feed.loadingMore || feed.loading || !feed.hasMore) return@launch
+            val cursor = feed.nextCursor ?: return@launch
+            feed.loadingMore = true
+            try {
+                val q = videoListFiltersForRequest()
+                val res = ApiClient.api.listVideos(
+                    limit = 20,
+                    cursor = cursor,
+                    search = feed.search.ifBlank { null },
+                    authorId = authorId,
+                    random = randomQueryParamForList(),
+                    rate = q.rate,
+                    minRate = q.minRate,
+                    maxRate = q.maxRate,
+                    isLike = q.isLike,
+                    isFavor = q.isFavor,
+                    status = q.status,
+                )
+                val newItems = res.results.orEmpty().filter { n -> feed.items.none { it.id == n.id } }
+                if (newItems.isNotEmpty()) {
+                    feed.items.addAll(newItems)
+                }
+                applyPaginationLinks(res.next, res.previous)
+                if (res.results.isNullOrEmpty()) {
+                    feed.hasMore = false
+                    feed.nextCursor = null
+                }
+                feed.loadedCount = feed.items.size
+                onVideoCountUpdate?.invoke(feed.loadedCount)
+            } catch (_: Exception) {
+            } finally {
+                feed.loadingMore = false
+            }
+        }
+    }
+
+    fun loadPreviousVideos() {
+        scope.launch {
+            if (feed.loadingPrevious || feed.loading || !feed.hasPrevious) return@launch
+            val cursor = feed.previousCursor ?: return@launch
+            feed.loadingPrevious = true
+            try {
+                val q = videoListFiltersForRequest()
+                val res = ApiClient.api.listVideos(
+                    limit = 20,
+                    cursor = cursor,
+                    search = feed.search.ifBlank { null },
+                    authorId = authorId,
+                    random = randomQueryParamForList(),
+                    rate = q.rate,
+                    minRate = q.minRate,
+                    maxRate = q.maxRate,
+                    isLike = q.isLike,
+                    isFavor = q.isFavor,
+                    status = q.status,
+                )
+                val newItems = res.results.orEmpty().filter { n -> feed.items.none { it.id == n.id } }
+                if (newItems.isNotEmpty()) {
+                    val added = newItems.size
+                    feed.items.addAll(0, newItems)
+                    val first = feed.gridState.firstVisibleItemIndex
+                    val offset = feed.gridState.firstVisibleItemScrollOffset
+                    feed.gridState.scrollToItem(first + added, offset)
+                }
+                applyPaginationLinks(res.next, res.previous)
+                if (res.results.isNullOrEmpty()) {
+                    feed.hasPrevious = false
+                    feed.previousCursor = null
+                }
+                feed.loadedCount = feed.items.size
+                onVideoCountUpdate?.invoke(feed.loadedCount)
+            } catch (_: Exception) {
+            } finally {
+                feed.loadingPrevious = false
             }
         }
     }
@@ -149,36 +244,15 @@ fun VideosScreen(
         snapshotFlow {
             val info = feed.gridState.layoutInfo
             val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last to feed.items.size
-        }.collect { (lastVisible, size) ->
+            val first = feed.gridState.firstVisibleItemIndex
+            Triple(first, last, feed.items.size)
+        }.collect { (firstVisible, lastVisible, size) ->
             if (size == 0 || feed.loading) return@collect
-            if (lastVisible >= size - 4 && feed.items.size < feed.total) {
-                feed.loading = true
-                try {
-                    val next = feed.page + 1
-                    val q = videoListFiltersForRequest()
-                    val res = ApiClient.api.listVideos(
-                        limit = 20,
-                        page = next,
-                        search = feed.search.ifBlank { null },
-                        authorId = authorId,
-                        random = randomQueryParamForList(),
-                        rate = q.rate,
-                        minRate = q.minRate,
-                        maxRate = q.maxRate,
-                        isLike = q.isLike,
-                        isFavor = q.isFavor,
-                        status = q.status,
-                    )
-                    val newItems = res.results.orEmpty().filter { n -> feed.items.none { it.id == n.id } }
-                    if (newItems.isNotEmpty()) {
-                        feed.items.addAll(newItems)
-                        feed.page = next
-                    }
-                } catch (_: Exception) {
-                } finally {
-                    feed.loading = false
-                }
+            if (firstVisible <= 2 && feed.hasPrevious && !feed.loadingPrevious) {
+                loadPreviousVideos()
+            }
+            if (lastVisible >= size - 4 && feed.hasMore && !feed.loadingMore) {
+                loadMoreVideos()
             }
         }
     }
@@ -210,6 +284,19 @@ fun VideosScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    val span = GridItemSpan(feed.gridColumns.coerceIn(2, 4))
+                    if (feed.loadingPrevious) {
+                        item(key = "loading_previous", span = { span }) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(Modifier.size(28.dp))
+                            }
+                        }
+                    }
                     items(feed.items, key = { it.id }) { video ->
                         VideoGridItem(
                             video = video,
@@ -221,8 +308,8 @@ fun VideosScreen(
                                     if (idx >= 0) {
                                         val pagination = PlayerPlaylistHolder.PlaylistPagination(
                                             limit = 20,
-                                            nextPageToLoad = feed.page + 1,
-                                            remoteTotal = feed.total,
+                                            nextCursor = feed.nextCursor,
+                                            previousCursor = feed.previousCursor,
                                             search = feed.search.ifBlank { null },
                                             authorId = authorId,
                                             useRandomList = authorId == null && feed.useRandomList,
@@ -233,6 +320,18 @@ fun VideosScreen(
                                 }
                             },
                         )
+                    }
+                    if (feed.loadingMore) {
+                        item(key = "loading_more", span = { span }) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(Modifier.size(28.dp))
+                            }
+                        }
                     }
                 }
             }

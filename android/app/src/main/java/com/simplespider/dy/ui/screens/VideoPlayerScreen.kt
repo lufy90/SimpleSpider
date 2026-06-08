@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -67,8 +68,11 @@ import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.RatePatchBody
 import com.simplespider.dy.data.TokenStore
-import com.simplespider.dy.ui.components.RateStarsRow
+import com.simplespider.dy.data.cursorFromPaginationLink
+import com.simplespider.dy.data.hasMoreFromPaginationLink
+import com.simplespider.dy.data.formatVideoDateTime
 import com.simplespider.dy.data.VideoEndAction
+import com.simplespider.dy.ui.components.RateStarsRow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
@@ -112,64 +116,102 @@ fun VideoPlayerScreen(
         pageCount = { max(1, entryList.size) },
     )
 
+    var loadingNextPage by remember { mutableStateOf(false) }
+    var loadingPreviousPage by remember { mutableStateOf(false) }
+
     LaunchedEffect(player, pagination) {
         val seed = pagination ?: return@LaunchedEffect
         val mutex = Mutex()
-        var cursor = seed
-        var exhausted = false
+        var pageState = seed
+        var nextExhausted = pageState.nextCursor.isNullOrBlank()
+        var prevExhausted = pageState.previousCursor.isNullOrBlank()
+
+        suspend fun fetchVideos(cursor: String) =
+            ApiClient.api.listVideos(
+                limit = pageState.limit,
+                cursor = cursor,
+                search = pageState.search,
+                authorId = pageState.authorId,
+                random = if (pageState.useRandomList) "true" else null,
+                rate = pageState.query.rate,
+                minRate = pageState.query.minRate,
+                maxRate = pageState.query.maxRate,
+                isLike = pageState.query.isLike,
+                isFavor = pageState.query.isFavor,
+                status = pageState.query.status,
+            )
+
         snapshotFlow { pagerState.settledPage to entryList.size }
             .distinctUntilChanged()
             .collect { (page, size) ->
-                if (exhausted || size == 0) return@collect
+                if (size == 0) return@collect
+
                 val nearEnd = page >= max(0, size - 2)
-                if (!nearEnd) return@collect
-                mutex.withLock {
-                    if (exhausted) return@withLock
-                    val cur = cursor
-                    val remoteTotal = cur.remoteTotal
-                    if (remoteTotal > 0) {
-                        val maxPage = max(1, (remoteTotal + cur.limit - 1) / cur.limit)
-                        if (cur.nextPageToLoad > maxPage) {
-                            exhausted = true
-                            return@withLock
+                if (nearEnd && !nextExhausted && !pageState.nextCursor.isNullOrBlank()) {
+                    mutex.withLock {
+                        if (loadingNextPage || nextExhausted) return@withLock
+                        val requestCursor = pageState.nextCursor ?: return@withLock
+                        loadingNextPage = true
+                        try {
+                            val res = fetchVideos(requestCursor)
+                            val raw = res.results.orEmpty()
+                            if (raw.isEmpty()) {
+                                nextExhausted = true
+                                pageState = pageState.copy(nextCursor = null)
+                                return@withLock
+                            }
+                            val existing = entryList.map { it.id }.toSet()
+                            val appended = raw
+                                .filter { !it.playSrc.isNullOrBlank() && it.id !in existing }
+                                .map { PlayerPlaylistHolder.entryFromVideo(it) }
+                            if (appended.isNotEmpty()) {
+                                entryList.addAll(appended)
+                            }
+                            pageState = pageState.copy(
+                                nextCursor = cursorFromPaginationLink(res.next),
+                                previousCursor = cursorFromPaginationLink(res.previous),
+                            )
+                            nextExhausted = !hasMoreFromPaginationLink(res.next)
+                        } catch (_: Exception) {
+                        } finally {
+                            loadingNextPage = false
                         }
                     }
-                    try {
-                        val random = if (cur.useRandomList) "true" else null
-                        val q = cur.query
-                        val res = ApiClient.api.listVideos(
-                            limit = cur.limit,
-                            page = cur.nextPageToLoad,
-                            search = cur.search,
-                            authorId = cur.authorId,
-                            random = random,
-                            rate = q.rate,
-                            minRate = q.minRate,
-                            maxRate = q.maxRate,
-                            isLike = q.isLike,
-                            isFavor = q.isFavor,
-                            status = q.status,
-                        )
-                        val raw = res.results.orEmpty()
-                        val newTotal = if (res.count > 0) res.count else cur.remoteTotal
-                        if (raw.isEmpty()) {
-                            exhausted = true
-                            cursor = cur.copy(remoteTotal = newTotal)
-                            return@withLock
+                }
+
+                val nearStart = page <= 1
+                if (nearStart && !prevExhausted && !pageState.previousCursor.isNullOrBlank()) {
+                    mutex.withLock {
+                        if (loadingPreviousPage || prevExhausted) return@withLock
+                        val requestCursor = pageState.previousCursor ?: return@withLock
+                        loadingPreviousPage = true
+                        try {
+                            val res = fetchVideos(requestCursor)
+                            val raw = res.results.orEmpty()
+                            if (raw.isEmpty()) {
+                                prevExhausted = true
+                                pageState = pageState.copy(previousCursor = null)
+                                return@withLock
+                            }
+                            val existing = entryList.map { it.id }.toSet()
+                            val prepended = raw
+                                .filter { !it.playSrc.isNullOrBlank() && it.id !in existing }
+                                .map { PlayerPlaylistHolder.entryFromVideo(it) }
+                            if (prepended.isNotEmpty()) {
+                                val added = prepended.size
+                                entryList.addAll(0, prepended)
+                                val newPage = pagerState.settledPage + added
+                                pagerState.scrollToPage(newPage.coerceIn(0, entryList.lastIndex))
+                            }
+                            pageState = pageState.copy(
+                                nextCursor = cursorFromPaginationLink(res.next),
+                                previousCursor = cursorFromPaginationLink(res.previous),
+                            )
+                            prevExhausted = !hasMoreFromPaginationLink(res.previous)
+                        } catch (_: Exception) {
+                        } finally {
+                            loadingPreviousPage = false
                         }
-                        val existing = entryList.map { it.id }.toSet()
-                        val appended = raw
-                            .filter { !it.playSrc.isNullOrBlank() && it.id !in existing }
-                            .map { PlayerPlaylistHolder.entryFromVideo(it) }
-                        entryList.addAll(appended)
-                        cursor = cur.copy(
-                            nextPageToLoad = cur.nextPageToLoad + 1,
-                            remoteTotal = newTotal,
-                        )
-                        if (raw.size < cur.limit && appended.isEmpty()) {
-                            exhausted = true
-                        }
-                    } catch (_: Exception) {
                     }
                 }
             }
@@ -241,8 +283,9 @@ fun VideoPlayerScreen(
     val currentPlayer = rememberUpdatedState(player)
 
     val settledPage = pagerState.settledPage
-    val title = entryList.getOrNull(settledPage)?.title ?: "Video"
     val settledEntry = entryList.getOrNull(settledPage)
+    val title = settledEntry?.title ?: "Video"
+    val createTimeLabel = formatVideoDateTime(settledEntry?.createTime)
     var rateMenuOpen by remember { mutableStateOf(false) }
     var videoRateStars by remember { mutableIntStateOf(0) }
     var rateBusy by remember { mutableStateOf(false) }
@@ -328,6 +371,36 @@ fun VideoPlayerScreen(
                     }
                 }
             }
+        }
+
+        AnimatedVisibility(
+            visible = loadingPreviousPage,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 56.dp),
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(36.dp),
+                color = MaterialTheme.colorScheme.onPrimary,
+                strokeWidth = 3.dp,
+            )
+        }
+
+        AnimatedVisibility(
+            visible = loadingNextPage,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 160.dp),
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(36.dp),
+                color = MaterialTheme.colorScheme.onPrimary,
+                strokeWidth = 3.dp,
+            )
         }
 
         Box(
@@ -483,14 +556,27 @@ fun VideoPlayerScreen(
                 .padding(horizontal = 10.dp, vertical = 8.dp)
                 .padding(bottom = 90.dp),
         ) {
-            Text(
-                text = title,
-                modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(Modifier.fillMaxWidth()) {
+                if (!createTimeLabel.isNullOrBlank()) {
+                    Text(
+                        text = createTimeLabel,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+                Text(
+                    text = title,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

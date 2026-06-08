@@ -11,10 +11,10 @@ interface ApiService {
     @POST("token/")
     suspend fun login(@Body body: LoginRequest): LoginResponse
 
-    @GET("dy/author/")
+    @GET("dy/author-view/")
     suspend fun listAuthors(
         @Query("limit") limit: Int,
-        @Query("page") page: Int,
+        @Query("cursor") cursor: String? = null,
         @Query("search") search: String? = null,
         @Query("rate") rate: Int? = null,
         @Query("status") status: String? = null,
@@ -27,10 +27,10 @@ interface ApiService {
     @PATCH("dy/author/{id}/")
     suspend fun patchAuthor(@Path("id") id: Int, @Body body: RatePatchBody): DyAuthorDto
 
-    @GET("dy/video/")
+    @GET("dy/video-view/")
     suspend fun listVideos(
         @Query("limit") limit: Int,
-        @Query("page") page: Int,
+        @Query("cursor") cursor: String? = null,
         @Query("search") search: String? = null,
         @Query("rate") rate: Int? = null,
         @Query("min_rate") minRate: Int? = null,

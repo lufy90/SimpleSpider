@@ -5,7 +5,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,10 +17,14 @@ class AuthorsListHoistedState(
     val listState: LazyListState,
 ) {
     var search by mutableStateOf("")
-    var page by mutableIntStateOf(1)
+    var nextCursor by mutableStateOf<String?>(null)
+    var previousCursor by mutableStateOf<String?>(null)
     val items: SnapshotStateList<DyAuthorDto> = mutableStateListOf()
-    var total by mutableIntStateOf(0)
+    var hasMore by mutableStateOf(false)
+    var hasPrevious by mutableStateOf(false)
     var loading by mutableStateOf(false)
+    var loadingMore by mutableStateOf(false)
+    var loadingPrevious by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var rateSavingId by mutableStateOf<Int?>(null)
     var showSearchBar by mutableStateOf(false)
