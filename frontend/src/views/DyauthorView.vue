@@ -11,9 +11,10 @@
             v-model="searchInput"
             placeholder="Search"
             prefix-icon="Search"
+            clearable
+            @clear="searchFn"
             @keydown.enter.prevent="searchFn"
             style="width: 240px"
-            clearable
           />
         </el-form-item>
         <el-form-item>
