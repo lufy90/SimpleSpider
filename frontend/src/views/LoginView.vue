@@ -11,15 +11,30 @@
       </div>
       <el-form :model="loginForm" :rules="rules" ref="loginFormRef" label-width="80px">
         <el-form-item label="Username" prop="username">
-          <el-input v-model="loginForm.username" placeholder="Enter username" />
+          <el-input
+            v-model="loginForm.username"
+            placeholder="Enter username"
+            autocomplete="username"
+            autocapitalize="off"
+            spellcheck="false"
+          />
         </el-form-item>
         <el-form-item label="Password" prop="password">
           <el-input
             v-model="loginForm.password"
             type="password"
             placeholder="Enter password"
+            autocomplete="current-password"
+            autocapitalize="off"
+            spellcheck="false"
+            inputmode="text"
             @keyup.enter="handleLogin"
           />
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="rememberLogin">
+            Remember username and password
+          </el-checkbox>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleLogin" :loading="loading">
@@ -32,15 +47,20 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import { APIURL } from '@/config'
 
+const REMEMBER_KEY = 'login_remember'
+const USERNAME_KEY = 'login_username'
+const PASSWORD_KEY = 'login_password'
+
 const router = useRouter()
 const loginFormRef = ref(null)
 const loading = ref(false)
+const rememberLogin = ref(false)
 
 const loginForm = ref({
   username: '',
@@ -52,9 +72,32 @@ const rules = {
   password: [{ required: true, message: 'Please enter password', trigger: 'blur' }],
 }
 
+function loadSavedCredentials() {
+  if (localStorage.getItem(REMEMBER_KEY) !== 'true') return
+  rememberLogin.value = true
+  loginForm.value.username = localStorage.getItem(USERNAME_KEY) || ''
+  loginForm.value.password = localStorage.getItem(PASSWORD_KEY) || ''
+}
+
+function persistCredentials() {
+  if (rememberLogin.value) {
+    localStorage.setItem(REMEMBER_KEY, 'true')
+    localStorage.setItem(USERNAME_KEY, loginForm.value.username)
+    localStorage.setItem(PASSWORD_KEY, loginForm.value.password)
+    return
+  }
+  localStorage.removeItem(REMEMBER_KEY)
+  localStorage.removeItem(USERNAME_KEY)
+  localStorage.removeItem(PASSWORD_KEY)
+}
+
+onMounted(() => {
+  loadSavedCredentials()
+})
+
 const handleLogin = async () => {
   if (!loginFormRef.value) return
-  
+
   await loginFormRef.value.validate(async (valid) => {
     if (valid) {
       loading.value = true
@@ -63,10 +106,11 @@ const handleLogin = async () => {
           username: loginForm.value.username,
           password: loginForm.value.password,
         })
-        
+
         if (response && response.data && response.data.access_token) {
           const token = String(response.data.access_token)
           sessionStorage.setItem('token', token)
+          persistCredentials()
           ElMessage.success('Login successful')
           router.push('/dyauthor')
         } else {

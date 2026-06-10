@@ -28,6 +28,15 @@ class TokenStore(private val context: Context) {
     private val keyVideoQueryIsLike = stringPreferencesKey("video_query_is_like")
     private val keyVideoQueryIsFavor = stringPreferencesKey("video_query_is_favor")
     private val keyVideoQueryStatus = stringPreferencesKey("video_query_status")
+    private val keyRememberLogin = booleanPreferencesKey("remember_login")
+    private val keySavedUsername = stringPreferencesKey("saved_username")
+    private val keySavedPassword = stringPreferencesKey("saved_password")
+
+    data class SavedLoginCredentials(
+        val remember: Boolean,
+        val username: String,
+        val password: String,
+    )
 
     val tokenFlow: Flow<String?> = context.dataStore.data.map { prefs ->
         prefs[keyToken]
@@ -113,6 +122,32 @@ class TokenStore(private val context: Context) {
 
     suspend fun clearToken() {
         context.dataStore.edit { it.remove(keyToken) }
+    }
+
+    suspend fun readSavedLoginCredentials(): SavedLoginCredentials {
+        val prefs = context.dataStore.data.first()
+        val remember = prefs[keyRememberLogin] == true
+        return SavedLoginCredentials(
+            remember = remember,
+            username = prefs[keySavedUsername].orEmpty(),
+            password = prefs[keySavedPassword].orEmpty(),
+        )
+    }
+
+    suspend fun saveLoginCredentials(username: String, password: String) {
+        context.dataStore.edit { prefs ->
+            prefs[keyRememberLogin] = true
+            prefs[keySavedUsername] = username.trim()
+            prefs[keySavedPassword] = password
+        }
+    }
+
+    suspend fun clearSavedLoginCredentials() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(keyRememberLogin)
+            prefs.remove(keySavedUsername)
+            prefs.remove(keySavedPassword)
+        }
     }
 
     suspend fun saveApiServerHostPort(hostPort: String) {

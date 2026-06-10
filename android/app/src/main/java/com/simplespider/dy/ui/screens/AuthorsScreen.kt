@@ -19,9 +19,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -287,6 +291,16 @@ fun AuthorsScreen(
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        if (state.search.isNotEmpty()) {
+                            IconButton(onClick = { state.search = "" }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Clear,
+                                    contentDescription = "Clear search",
+                                )
+                            }
+                        }
+                    },
                     colors = OutlinedTextFieldDefaults.colors(
                         unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
                         focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f),
