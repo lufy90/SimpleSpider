@@ -87,7 +87,7 @@ fun SettingsScreen(
             Text("API server", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
-                "HTTPS by default. Host or host:port (default port 8000 if omitted). Prefix http:// for plain HTTP.",
+                "HTTPS by default. Add your CA to android/trust-ca/api_trust_ca.pem and rebuild. Prefix http:// for plain HTTP.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DyTextSecondary,
             )
