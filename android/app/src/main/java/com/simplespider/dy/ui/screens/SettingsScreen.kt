@@ -87,7 +87,7 @@ fun SettingsScreen(
             Text("API server", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
-                "HTTP only. Host or host:port (default port 8000 if omitted).",
+                "HTTPS by default. Host or host:port (default port 8000 if omitted). Prefix http:// for plain HTTP.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DyTextSecondary,
             )
