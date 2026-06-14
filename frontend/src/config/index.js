@@ -14,6 +14,11 @@ export const HOST_TO_APIDOMAIN = {
 const DEFAULT_APIDOMAIN =
   process.env.NODE_ENV === 'development' ? '192.168.1.134:8003' : '192.168.1.137:8000'
 
+function getApiProtocol() {
+  if (typeof window === 'undefined') return 'https'
+  return window.location.protocol === 'http:' ? 'http' : 'https'
+}
+
 function getApiDomain() {
   if (typeof window === 'undefined') return DEFAULT_APIDOMAIN
   const host = window.location.hostname
@@ -21,8 +26,9 @@ function getApiDomain() {
 }
 
 export const APIDOMAIN = getApiDomain()
-export const APIURL = `http://${APIDOMAIN}/api`
-export const STATICURL = `http://${APIDOMAIN}/static/`
+const API_SCHEME = getApiProtocol()
+export const APIURL = `${API_SCHEME}://${APIDOMAIN}/api`
+export const STATICURL = `${API_SCHEME}://${APIDOMAIN}/static/`
 export const timeOption = { timeZone: 'Asia/Shanghai' }
-export const DYURL = `http://${APIDOMAIN}/api/dydata/`
+export const DYURL = `${API_SCHEME}://${APIDOMAIN}/api/dydata/`
 
