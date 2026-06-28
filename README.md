@@ -5,6 +5,9 @@
 - 爬虫基于 playwright，可批量爬取喜欢/收藏视频，可批量爬取多位作者的所有视频
 - 便捷的 UI 功能，通过前端 UI 下发任务，包含丰富的任务配置：爬取的请求数量、按过滤结果爬取等
 - 内容管理功能，管理爬取到的作者和视频（Web 前端基于 Vue 3 和 element-plus；Android 端可浏览作者与视频、竖滑播放、评分与筛选）
+- 爬取任务管理提供了丰富的任务配置项，可以从 web 页面自定义爬取线程数、下载线程数，筛选作者爬取，多页爬取等
+- 使用 Python Threading 做为爬取和下载 Worker，不依赖 celery
+- 使用数据库做 broker，无需部署 redis
 - 自动评分，可导出人工评分的数据并训练模型，再通过模型自动评分
 
 ## 目录说明
@@ -35,22 +38,22 @@ pip install -r requirements.txt
 playwright install
 ```
 
-2. 初始化数据库
+2. 配置 IP/端口（前后端互通）
+
+- 修改 `backend/backend/settings.py`
+  - 如需要跨域访问，请调整 `CORS_ALLOWED_ORIGINS`
+  - 默认使用 sqlite，如你使用 MariaDB/PostgreSQL，请把 `DATABASES` 里对应的 `HOST/PORT` 改成你的实际地址，并修改数据库 `NAME/USER/PASSWORD`
+- 修改 `frontend/src/config/index.js`
+  - 根据你实际访问前端的主机名，调整 `HOST_TO_APIDOMAIN`
+  - 同时更新 `DEFAULT_APIDOMAIN`，确保 `APIURL/STATICURL/DYURL` 指向你的后端 `host:port`
+
+3. 初始化数据库
 
 ```bash
 python manage.py makemigrations
 python manage.py migrate
 python manage.py createsuperuser
 ```
-
-3. 配置 IP/端口（前后端互通）
-
-- 修改 `backend/backend/settings.py`
-  - 如需要跨域访问，请调整 `CORS_ALLOWED_ORIGINS`
-  - 如你使用 MariaDB/PostgreSQL，请把 `DATABASES` 里对应的 `HOST/PORT` 改成你的实际地址
-- 修改 `frontend/src/config/index.js`
-  - 根据你实际访问前端的主机名，调整 `HOST_TO_APIDOMAIN`
-  - 同时更新 `DEFAULT_APIDOMAIN`，确保 `APIURL/STATICURL/DYURL` 指向你的后端 `host:port`
 
 4. 设置 Cookie（首次/更新时）
 
@@ -120,30 +123,53 @@ npm run build
 - 若使用 Nginx，配合 `templates/simplespider.conf`
 - 若使用 gunicorn/django 方式，也需要确保静态目录与路由配置正确
 
+## 开始任务
+
+1. 如果前面的部署中，你已执行这一步，则跳过。在后端桌面环境（需要打开浏览器），打开终端，进入 `SimpleSpider/backend`, 执行
+
+```
+./manage.py set_cookies
+```
+
+这个步骤会打开浏览器，请从浏览器通过扫码或者验证码登录你的抖音账号，登录后，SimpleSpider 会自动获取 cookies 饼关闭浏览器。
+
+2. 在后端终端，启动你的爬取 Worker 和 下载 Worker, 下载器可以部署在其他机器上，它通过 crawler 爬取到的 URL 下载视频或图片
+
+```
+./manage.py start_crawler &> crawler.log &
+./manage.py start_downloader &> downloader.log &
+```
+
+> 注意：需要确保 downloader 和 crawler 使用相同的数据库。
+
+3. 在前端界面，打开 Tasks 界面，点击新建，选择 Crawl by URL，填写收藏或者喜欢的 URL，点击提交，任务会自动开始运行
+
+![爬取我的喜欢](docs/images/task_create_my_like.png)
+
+> 我的喜欢 URL: https://www.douyin.com/user/self?showTab=like
+> 我的收藏 URL: https://www.douyin.com/user/self?showTab=favorite_collection
+
 ## Android 客户端（可选）
 
 ### 获取安装包
 
-预编译 APK（文件名与版本以该下载为准）：[simplespider-0.0.1.apk](http://lufy.org:8000/simplespider-0.0.1.apk)
+预编译 APK（文件名与版本以该下载为准）：[simplespider-0.0.1.apk](http://lufy.org:8000/simplespider-0.0.1.apk)。但是 APK 中包含自授权的证书，因此如果你的服务端（后端）使用 HTTPS 协议，则需要自制证书，并放在 `android/trust-ca/api_trust_ca.pem`, 并通过 anroid 源码编译你的 APK。
 
 ### 使用前请确认
 
 - 本项目的 **Django 后端** 已启动且手机或模拟器 **能访问** 到该地址（例如同一局域网内的 `http://电脑IP:8000`）。
 - 已在后台 **创建好登录用户**；应用里用该账号密码登录。
-- 安装打开后，若列表或登录一直失败，请到 **设置** 页，把 **API server** 改成你的实际 **主机或 `主机:端口`**（不必手写 `http://`，按界面说明即可），再点 **Apply API address**。
+- 安装打开后，请先到 **设置** 页，把 **API server** 改成你的实际 **主机或 `主机:端口`**（不必手写 `http://`，按界面说明即可），再点 **Apply API address**。
 
-### 界面与用法说明
+![登录页面](docs/images/android/login_page.jpg)
 
-- **登录**：输入用户名、密码后登录；登录页也可进入 **设置** 先改 API 地址。
-- **底部三个入口**：**作者**、**视频**、**设置**。
-- **作者**：浏览作者列表，点一行进入 **作者详情**（头像、昵称、状态、评分等）；下方是该作者的 **视频网格**，点某个视频即 **全屏播放**。
-- **视频**：浏览全库视频的 **网格**；在 **视频** 页从顶部可 **下滑拉出搜索框**，输入关键词后稍停片刻会自动按搜索刷新列表；列表向下滑动到底会自动加载更多。
-- **播放**：竖向 **上/下滑** 切换上一条、下一条；**点一下画面** 暂停或继续；暂停时会显示进度等信息。右侧有 **作者头像**，可点 **菜单（⋮）** 给当前视频 **打分**；也可从菜单进入 **作者详情**（从播放器打开的作者页带 **系统返回** 即可回到播放）。
-- **设置**：除 **API 地址** 外，还可打开 **随机顺序**（视频列表每次打乱顺序）、选择 **一条播完后** 是接播下一条还是重播当前条、调整 **视频列表每行几个格子**；另有 **「仅影响视频列表请求」的筛选**（例如按评分、评分区间、是否点赞/收藏、处理状态等过滤列表）。需要离开当前账号时使用 **Log out**。
+![设置页面](docs/images/android/setting_page.jpg)
 
 ### 自行从源码编译（可选）
 
 若要在本机构建：用 **Android Studio** 打开仓库里的 **`android`** 目录，待 Gradle 同步完成后，直接 **Run** 到设备，或通过菜单生成 APK 即可。
+
+可参考 ![Android README](android/README.md)
 
 ## 部署模板（可选）
 
@@ -151,6 +177,14 @@ npm run build
 - `templates/start_workers.service`：worker 进程（数据库任务队列）systemd 模板
 
 你可以把其中的占位符替换为你的实际路径（如项目根目录、虚拟环境路径），再用 `systemctl` 启动。
+
+## 已知问题
+
+项目使用 Python multithreading 进行并发爬取，受限于 Python GIL 及 playwright 的多线程限制，实际无法打开多个 Headless 浏览器进行并发爬取，虽然定义多个 Crawler workers，但同时只会有 1 个 Crawler Worker 使用浏览器。后面会考虑使用 Python MultiProcessing 作为 Crawler worker。
+
+### 为什么不使用 Celery 和 Redis
+
+celery 和 redis 无疑可以为系统提供更健壮的任务管理能力，目前主要是考虑减少系统外部依赖，使用自定义的 worker (基于 python 线程) 调度和管理。
 
 ## 许可证（Strict）
 
