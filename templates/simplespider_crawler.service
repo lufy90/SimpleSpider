@@ -1,12 +1,12 @@
 [Unit]
-Description=SimpleSpider Workers (start_workers)
+Description=SimpleSpider Crawler
 After=network.target
 
 [Service]
-User=lufei
-Group=lufei
+User=test
+Group=test
 WorkingDirectory={{ PROJECT_ROOT }}/backend/
-ExecStart={{ VENV_ROOT }}/bin/python manage.py start_workers
+ExecStart={{ VENV_ROOT }}/bin/python manage.py start_crawler
 Restart=always
 RestartSec=3
 KillSignal=SIGTERM
