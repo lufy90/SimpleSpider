@@ -10,7 +10,7 @@ from .models import DyVideo, Status, DyAuthor
 from playwright.sync_api import Response
 import queue
 from concurrent.futures import ThreadPoolExecutor
-from threading import Thread
+from threading import Thread, Lock
 from django.contrib.auth.models import User
 from .models import Task
 from django.db import close_old_connections
@@ -429,17 +429,20 @@ def crawl_authors(aids, **kwargs) -> List[Dict[str, Any]]:
         # Create a thread pool executor for Django ORM operations
         # This isolates Django ORM from Playwright's async context
         db_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="db-worker")
-        
+        db_timeout = kwargs.get("db_operation_timeout", 120)
+
+        def recreate_page():
+            nonlocal page
+            page.close()
+            page = context.new_page()
+
         for aid in aids:
             close_old_connections()
             logger.info(f'crawl_authors aid: {aid}')
             try:
-                # Helper function to run Django ORM operations in a separate thread
-                # This avoids the async context issue with Playwright
                 def run_db_operation(func):
-                    """Run a database operation in a separate thread to avoid async context issues"""
                     future = db_executor.submit(func)
-                    return future.result()
+                    return future.result(timeout=db_timeout)
                 
                 # Get author in a thread-safe way
                 def get_author():
@@ -497,6 +500,11 @@ def crawl_authors(aids, **kwargs) -> List[Dict[str, Any]]:
                 import traceback
                 traceback.print_exc()
                 logger.error(f'crawl_authors error: {e}')
+
+                try:
+                    recreate_page()
+                except Exception as page_error:
+                    logger.error("Failed to recreate browser page after error: %s", page_error)
                 
                 # Update author status to ERROR in a thread-safe way
                 def update_to_error():
@@ -835,23 +843,35 @@ def save_worker(worker_id, q, sentinel=None):
         q.task_done()
     logger.info("save_worker %s exit", worker_id)
 
-def crawl_worker(worker_id, batches, **kwargs):
-    # Close old database connections in this thread before starting
-    # This is necessary because Django database connections are thread-local
-    while True:
-        try:
-            batch = batches.pop()
-        except IndexError:
-            logger.info(f"reach the end of batches, finished.")
-            break
-        except Exception as e:
-            logger.error(str(e))
-        try:
-            crawl_authors(batch, **kwargs)
-            logger.info(f"left batches: {len(batches)}")
-        except Exception as e:
-            logger.error("crawl_worker error for batch %s: %s", batch, e)
-            # Continue to next batch instead of exiting so remaining batches are still processed
+def crawl_worker(worker_id, batches, batch_lock, **kwargs):
+    close_old_connections()
+    logger.info("crawl_worker %s start", worker_id)
+    try:
+        while True:
+            close_old_connections()
+            try:
+                with batch_lock:
+                    batch = batches.pop()
+            except IndexError:
+                logger.info("crawl_worker %s reach the end of batches, finished.", worker_id)
+                break
+            except Exception as e:
+                logger.exception("crawl_worker %s failed to take batch: %s", worker_id, e)
+                continue
+            try:
+                logger.info(
+                    "crawl_worker %s processing batch with %s authors, left batches: %s",
+                    worker_id,
+                    len(batch),
+                    len(batches),
+                )
+                crawl_authors(batch, **kwargs)
+                logger.info("crawl_worker %s finished batch, left batches: %s", worker_id, len(batches))
+            except Exception as e:
+                logger.exception("crawl_worker %s error for batch %s: %s", worker_id, batch, e)
+    finally:
+        close_old_connections()
+        logger.info("crawl_worker %s exit", worker_id)
 
 def download_media(url, path, name, **kwargs):
     """
@@ -944,7 +964,16 @@ def crawl_authors_batch(aids, **kwargs):
     # num_crawl_workers = 1
     # num_save_workers = 1
 
-    crawl_workers = [Thread(target=crawl_worker, args=(i, batches), kwargs={"q": resp_q, **kwargs}) for i in range(num_crawl_workers)]
+    batch_lock = Lock()
+    crawl_workers = [
+        Thread(
+            target=crawl_worker,
+            args=(i, batches, batch_lock),
+            kwargs={"q": resp_q, **kwargs},
+            name=f"crawl-worker-{i}",
+        )
+        for i in range(num_crawl_workers)
+    ]
     logger.info("crawl_workers start: %s", num_crawl_workers)
     for t in crawl_workers:
         t.start()
