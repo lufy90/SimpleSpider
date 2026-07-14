@@ -11,18 +11,34 @@ Kotlin + Jetpack Compose client for the SimpleSpider Django API (same endpoints 
 
 ## Configure API base URL
 
-Edit `app/build.gradle.kts` → `defaultConfig` → `buildConfigField("String", "API_BASE_URL", ...)`:
+Edit `app/build.gradle.kts` → `defaultConfig` → `buildConfigField("String", "API_BASE_URL", ...)` for the default server, or set it in the app:
 
-- **Android Emulator** (host machine): default is `http://10.0.2.2:8000/api` (maps to `localhost:8000` on your PC).
-- **Physical device**: use your machine’s LAN IP, e.g. `http://192.168.1.134:8003/api` (match `frontend/src/config/index.js`).
+**Login → Settings (API server)** or **Settings** tab after login.
+
+- HTTPS is used by default; prefix with `http://` for plain HTTP.
+- Host or host:port (default port 8000 if omitted), e.g. `192.168.1.134:8000`.
 
 Trailing slash is added automatically in `ApiClient`.
+
+## HTTPS with a bundled CA
+
+For self-signed HTTPS, add your CA certificate to the project:
+
+```
+android/trust-ca/api_trust_ca.pem
+```
+
+Rebuild the app. See `android/trust-ca/README.md` for PEM format and export commands.
+
+The CA is bundled at build time. Users only set the API host in Settings — no per-device certificate setup.
+
+Public CA certificates (Let's Encrypt, etc.) work without `api_trust_ca.pem` via the system trust store.
 
 ## Run
 
 Open the `android` folder in Android Studio, sync Gradle, run on an emulator or device.
 
-Requires **minSdk 26**, cleartext HTTP allowed for development (`usesCleartextTraffic`).
+Requires **minSdk 26**.
 
 ## UI
 

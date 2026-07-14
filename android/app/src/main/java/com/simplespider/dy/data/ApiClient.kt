@@ -1,5 +1,6 @@
 package com.simplespider.dy.data
 
+import android.content.Context
 import com.google.gson.FieldNamingPolicy
 import com.google.gson.GsonBuilder
 import com.simplespider.dy.BuildConfig
@@ -16,6 +17,11 @@ object ApiClient {
 
     @Volatile
     private var apiService: ApiService? = null
+
+    @Volatile
+    private var okHttp: OkHttpClient? = null
+
+    private lateinit var appContext: Context
 
     private val gson = GsonBuilder()
         .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
@@ -52,14 +58,18 @@ object ApiClient {
         level = HttpLoggingInterceptor.Level.BASIC
     }
 
-    private val okHttp = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .addInterceptor(authInterceptor)
-        .addInterceptor(unauthorizedInterceptor)
-        .addInterceptor(logging)
-        .build()
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        synchronized(this) {
+            okHttp = buildOkHttpClient()
+            apiService = null
+        }
+        refreshImageLoader(appContext)
+    }
+
+    fun httpClient(): OkHttpClient = synchronized(this) {
+        okHttp ?: buildOkHttpClient().also { okHttp = it }
+    }
 
     @Synchronized
     fun applyBaseUrlOverride(apiBaseUrlOrNull: String?) {
@@ -74,12 +84,26 @@ object ApiClient {
             apiService ?: buildRetrofit().create(ApiService::class.java).also { apiService = it }
         }
 
+    private fun buildOkHttpClient(): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .addInterceptor(authInterceptor)
+            .addInterceptor(unauthorizedInterceptor)
+            .addInterceptor(logging)
+        if (::appContext.isInitialized) {
+            TrustedSsl.applyTo(builder, appContext)
+        }
+        return builder.build()
+    }
+
     private fun buildRetrofit(): Retrofit {
         val base = (overrideBaseUrl ?: BuildConfig.API_BASE_URL.ensureTrailingSlash())
             .ensureTrailingSlash()
         return Retrofit.Builder()
             .baseUrl(base)
-            .client(okHttp)
+            .client(httpClient())
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
     }

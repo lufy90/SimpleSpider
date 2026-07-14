@@ -42,6 +42,48 @@ android {
     }
 }
 
+val bundledCaSource = rootProject.file("trust-ca/api_trust_ca.pem")
+val bundledCaDest = file("src/main/res/raw/api_trust_ca.pem")
+val networkSecurityConfig = file("src/main/res/xml/network_security_config.xml")
+
+tasks.register("prepareBundledCa") {
+    doLast {
+        val hasBundledCa = bundledCaSource.exists()
+        if (hasBundledCa) {
+            bundledCaDest.parentFile.mkdirs()
+            bundledCaSource.copyTo(bundledCaDest, overwrite = true)
+        } else if (bundledCaDest.exists()) {
+            bundledCaDest.delete()
+        }
+
+        val bundledCaLine = if (hasBundledCa) {
+            "            <certificates src=\"@raw/api_trust_ca\" />\n"
+        } else {
+            ""
+        }
+
+        networkSecurityConfig.parentFile.mkdirs()
+        networkSecurityConfig.writeText(
+            buildString {
+                appendLine("""<?xml version="1.0" encoding="utf-8"?>""")
+                appendLine("""<network-security-config>""")
+                appendLine("""    <base-config cleartextTrafficPermitted="false">""")
+                appendLine("""        <trust-anchors>""")
+                appendLine("""            <certificates src="system" />""")
+                appendLine("""            <certificates src="user" />""")
+                append(bundledCaLine)
+                appendLine("""        </trust-anchors>""")
+                appendLine("""    </base-config>""")
+                appendLine("""</network-security-config>""")
+            },
+        )
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("prepareBundledCa")
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)
@@ -67,6 +109,9 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.5.0")
     implementation("androidx.media3:media3-ui:1.5.0")
+    implementation("androidx.media3:media3-database:1.5.0")
+    implementation("androidx.media3:media3-datasource:1.5.0")
+    implementation("androidx.media3:media3-datasource-okhttp:1.5.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

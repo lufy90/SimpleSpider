@@ -55,12 +55,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -72,7 +74,9 @@ import com.simplespider.dy.data.cursorFromPaginationLink
 import com.simplespider.dy.data.hasMoreFromPaginationLink
 import com.simplespider.dy.data.formatVideoDateTime
 import com.simplespider.dy.data.VideoEndAction
+import com.simplespider.dy.data.VideoPlaybackCache
 import com.simplespider.dy.ui.components.RateStarsRow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
@@ -82,6 +86,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlin.math.abs
 import kotlin.math.max
 
+@OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayerScreen(
     initialEntries: List<PlayerPlaylistHolder.Entry>,
@@ -93,12 +98,16 @@ fun VideoPlayerScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     val scope = rememberCoroutineScope()
     val player = remember {
-        ExoPlayer.Builder(context).build()
+        VideoPlaybackCache.createPlayer(context)
     }
     DisposableEffect(player) {
-        onDispose { player.release() }
+        onDispose {
+            VideoPlaybackCache.cancelPrefetch()
+            player.release()
+        }
     }
 
     var endAction by remember { mutableStateOf(VideoEndAction.PLAY_NEXT) }
@@ -232,6 +241,23 @@ fun VideoPlayerScreen(
             }
     }
 
+    LaunchedEffect(player, pagerState, entryList.size) {
+        var prefetchJob: Job? = null
+        snapshotFlow { pagerState.settledPage }
+            .distinctUntilChanged()
+            .collect { page ->
+                prefetchJob?.cancel()
+                VideoPlaybackCache.cancelPrefetch()
+                val urls = (1..VideoPlaybackCache.PREFETCH_AHEAD_COUNT).mapNotNull { offset ->
+                    entryList.getOrNull(page + offset)?.playUrl?.takeIf { it.isNotBlank() }
+                }
+                if (urls.isEmpty()) return@collect
+                prefetchJob = launch {
+                    VideoPlaybackCache.prefetchVideos(context, player, urls)
+                }
+            }
+    }
+
     var isPlaying by remember { mutableStateOf(false) }
     var positionMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
@@ -278,6 +304,33 @@ fun VideoPlayerScreen(
         player.addListener(listener)
         isPlaying = player.isPlaying
         onDispose { player.removeListener(listener) }
+    }
+
+    DisposableEffect(player, view) {
+        fun refreshKeepScreenOn() {
+            view.keepScreenOn = player.playWhenReady &&
+                (player.playbackState == Player.STATE_BUFFERING ||
+                    player.playbackState == Player.STATE_READY)
+        }
+        val keepAwakeListener = object : Player.Listener {
+            override fun onIsPlayingChanged(playingNow: Boolean) {
+                refreshKeepScreenOn()
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                refreshKeepScreenOn()
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                refreshKeepScreenOn()
+            }
+        }
+        player.addListener(keepAwakeListener)
+        refreshKeepScreenOn()
+        onDispose {
+            player.removeListener(keepAwakeListener)
+            view.keepScreenOn = false
+        }
     }
 
     val currentPlayer = rememberUpdatedState(player)
