@@ -8,7 +8,7 @@ By default only un-rated dyvideos (rate==0) are processed; use -f to force re-ra
 import logging
 import os
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.conf import settings as django_settings
 
 from dyvideo.models import DyVideo
@@ -22,6 +22,32 @@ from dyvideo.auto_rate import (
 logger = logging.getLogger(__name__)
 
 
+def _parse_author_ids(values):
+    """
+    Parse CLI author-id tokens into a unique list of ints.
+    Accepts space-separated and/or comma-separated values, e.g. 1 2 3 or 1,2,3.
+    """
+    if not values:
+        return None
+    ids = []
+    for token in values:
+        for part in str(token).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError as e:
+                raise CommandError(f"Invalid author id: {part!r}") from e
+    seen = set()
+    unique = []
+    for author_id in ids:
+        if author_id not in seen:
+            seen.add(author_id)
+            unique.append(author_id)
+    return unique or None
+
+
 class Command(BaseCommand):
     help = (
         "Auto-rate dyvideos: quick (cover image) or precise (-p, N frames from video). "
@@ -32,9 +58,14 @@ class Command(BaseCommand):
         parser.add_argument(
             "-a",
             "--author-id",
-            type=int,
+            nargs="+",
             default=None,
-            help="Only process videos belonging to this author (dyauthor id).",
+            dest="author_ids",
+            metavar="ID",
+            help=(
+                "Only process videos belonging to these authors (dyauthor ids). "
+                "Accepts multiple ids: -a 1 2 3 or -a 1,2,3."
+            ),
         )
         parser.add_argument(
             "-i",
@@ -96,7 +127,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        author_id = options["author_id"]
+        author_ids = _parse_author_ids(options["author_ids"])
         index = options["index"]
         offset = options["offset"]
         video_id = options["vid"]
@@ -174,13 +205,19 @@ class Command(BaseCommand):
                 queryset = DyVideo.objects.all().order_by("id")
             else:
                 queryset = DyVideo.objects.filter(rate=0).order_by("id")
-            if author_id is not None:
-                queryset = queryset.filter(author_id=author_id)
+            if author_ids is not None:
+                queryset = queryset.filter(author_id__in=author_ids)
 
         total = queryset.count()
         if total == 0:
             if video_id is not None:
                 msg = "Video not found." if DyVideo.objects.filter(id=video_id).count() == 0 else "Skipped (already rated, use -f to force)."
+            elif author_ids is not None:
+                msg = (
+                    f"No videos found for author id(s): {', '.join(map(str, author_ids))}."
+                    if force
+                    else f"No un-rated videos found for author id(s): {', '.join(map(str, author_ids))}."
+                )
             else:
                 msg = "No videos found." if force else "No un-rated videos found."
             self.stdout.write(self.style.WARNING(msg))
@@ -197,8 +234,11 @@ class Command(BaseCommand):
 
         scope = "video(s)" if force else "un-rated video(s)"
         mode = f"precise ({frame_count} frames)" if precise else "quick (cover)"
+        author_scope = (
+            f", authors={','.join(map(str, author_ids))}" if author_ids is not None else ""
+        )
         self.stdout.write(
-            f"Found {len(to_process)} {scope} to process (total: {total}), mode: {mode}."
+            f"Found {len(to_process)} {scope} to process (total: {total}), mode: {mode}{author_scope}."
         )
         if dry_run:
             for v in to_process:
