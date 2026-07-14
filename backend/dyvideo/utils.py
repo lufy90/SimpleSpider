@@ -631,10 +631,9 @@ def save_data(item:dict={}):
         # save profile data
         author_data = format_author_data(json_info)
         sec_uid = author_data.get("sec_uid")
-        if author and sec_uid in author.url:
-            if sec_uid:
-                if sec_uid in author.url or sec_uid == author.sec_uid:
-                    author = author
+        if sec_uid and author:
+            if sec_uid in author.url or sec_uid == author.sec_uid:
+                author = author
         else:
             try:
                 author = DyAuthor.objects.get(sec_uid=author_data["sec_uid"])
