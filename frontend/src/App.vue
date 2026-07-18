@@ -2,7 +2,10 @@
   <el-container>
     <el-header v-if="showHeader" class="header">
       <div class="header-content">
-        <div class="logo">SimpleSpider</div>
+        <div class="logo">
+          <img src="/favicon.svg" alt="SimpleSpider" class="logo-icon" />
+          <span>SimpleSpider</span>
+        </div>
         <el-menu
           :default-active="activeMenu"
           mode="horizontal"
