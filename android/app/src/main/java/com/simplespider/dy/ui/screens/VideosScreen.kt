@@ -223,7 +223,11 @@ fun VideosScreen(
 
     LaunchedEffect(authorId, tokenStore) {
         if (authorId != null) {
-            resetAndLoad()
+            if (feed.items.isEmpty()) {
+                resetAndLoad()
+            } else {
+                onVideoCountUpdate?.invoke(feed.loadedCount)
+            }
             return@LaunchedEffect
         } else {
             val currentQ = tokenStore.readVideoListQueryParams()

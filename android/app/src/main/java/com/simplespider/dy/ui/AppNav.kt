@@ -82,6 +82,7 @@ fun AppNav(
     }
 
     val mainVideosFeedHoist = remember { VideosFeedHoist() }
+    val authorDetailVideoFeedHolder = remember { AuthorDetailVideoFeedHolder() }
 
     NavHost(navController = navController, startDestination = dest) {
         composable(ROUTE_LOGIN) {
@@ -100,6 +101,7 @@ fun AppNav(
                 navController = navController,
                 tokenStore = tokenStore,
                 mainVideosFeedHoist = mainVideosFeedHoist,
+                authorDetailVideoFeedHolder = authorDetailVideoFeedHolder,
                 onLoggedOut = {
                     navController.navigate(ROUTE_LOGIN) {
                         popUpTo(navController.graph.id) { inclusive = true }
@@ -157,6 +159,7 @@ fun AppNav(
                 modifier = Modifier.safeDrawingPadding(),
                 authorId = authorId,
                 tokenStore = tokenStore,
+                videoFeedHolder = authorDetailVideoFeedHolder,
                 onBack = { navController.popBackStack() },
                 onVideoClick = { _, playlist, index, pagination ->
                     PlayerPlaylistHolder.setFromVideos(
@@ -177,6 +180,7 @@ private fun MainTabs(
     navController: NavHostController,
     tokenStore: TokenStore,
     mainVideosFeedHoist: VideosFeedHoist,
+    authorDetailVideoFeedHolder: AuthorDetailVideoFeedHolder,
     onLoggedOut: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -232,6 +236,7 @@ private fun MainTabs(
                 modifier = Modifier.padding(padding),
                 tokenStore = tokenStore,
                 rootNavController = navController,
+                authorDetailVideoFeedHolder = authorDetailVideoFeedHolder,
             )
             1 -> VideosScreen(
                 modifier = Modifier.padding(padding),
@@ -257,6 +262,7 @@ private fun AuthorsTabWithNestedNav(
     modifier: Modifier = Modifier,
     tokenStore: TokenStore,
     rootNavController: NavHostController,
+    authorDetailVideoFeedHolder: AuthorDetailVideoFeedHolder,
 ) {
     val authorsNavController = rememberNavController()
     val hoisted = rememberAuthorsListHoistedState()
@@ -283,6 +289,7 @@ private fun AuthorsTabWithNestedNav(
             AuthorDetailScreen(
                 authorId = authorId,
                 tokenStore = tokenStore,
+                videoFeedHolder = authorDetailVideoFeedHolder,
                 onBack = { authorsNavController.popBackStack() },
                 onVideoClick = { _, playlist, index, pagination ->
                     PlayerPlaylistHolder.setFromVideos(
