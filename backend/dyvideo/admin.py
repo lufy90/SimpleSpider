@@ -34,8 +34,8 @@ class DyAuthorAdmin(admin.ModelAdmin):
 @admin.register(DyVideo)
 class DyVideoAdmin(admin.ModelAdmin):
     """Admin configuration for DyVideo model"""
-    list_display = ['name', 'vid', 'author_name', 'rate', 'is_favor', 'valid', 'create_time', 'created_at']
-    list_filter = ['is_like', 'is_favor', 'valid', 'created_at']
+    list_display = ['name', 'vid', 'author_name', 'content_type', 'rate', 'is_favor', 'valid', 'create_time', 'created_at']
+    list_filter = ['content_type', 'is_like', 'is_favor', 'valid', 'created_at']
     search_fields = ['name', 'vid', 'author_name', 'author_uid', 'desc']
     ordering = ['-created_at']
     readonly_fields = ['created_at', 'updated_at']
@@ -48,7 +48,7 @@ class DyVideoAdmin(admin.ModelAdmin):
             'fields': ('author', 'author_name', 'author_uid', 'author_unique_id')
         }),
         ('Media', {
-            'fields': ('path', 'play_src', 'cover', 'origin_url', 'cover_url')
+            'fields': ('path', 'content_type', 'media_urls', 'cover_url')
         }),
         ('Stats', {
             'fields': ('rate', 'is_like', 'is_favor', 'valid')

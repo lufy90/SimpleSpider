@@ -291,7 +291,12 @@ class Command(BaseCommand):
                     'is_like': bool(get_value(row, 'is_like', False)),
                     'is_favor': bool(get_value(row, 'is_favor', False)),
                     'desc': get_value(row, 'desc') or '',
-                    'origin_url': get_value(row, 'origin_url') or '',
+                    'content_type': 'video',
+                    'media_urls': (
+                        [{'kind': 'video', 'url': origin_url, 'index': 0}]
+                        if (origin_url := get_value(row, 'origin_url') or '')
+                        else []
+                    ),
                     'cover_url': get_value(row, 'cover_url') or '',
                     'size': 0,  # fastapi_backend doesn't have this field
                     'created_by': user,

@@ -57,6 +57,12 @@ class DyAuthor(models.Model):
         return f"{self.name} ({self.unique_id})"
 
 
+class ContentType(models.TextChoices):
+    VIDEO = 'video', 'Video'
+    PHOTO_SLIDES = 'photo_slides', 'Photo Slides'
+    VIDEO_SLIDES = 'video_slides', 'Video Slides'
+
+
 class DyVideo(models.Model):
     """Douyin Video model"""
     path = models.CharField(max_length=255, default="")
@@ -73,7 +79,12 @@ class DyVideo(models.Model):
     is_like = models.BooleanField(default=False)
     is_favor = models.BooleanField(default=False)
     desc = models.TextField(blank=True, default="")
-    origin_url = models.CharField(max_length=2000, default="")
+    content_type = models.CharField(
+        max_length=20,
+        choices=ContentType.choices,
+        default=ContentType.VIDEO,
+    )
+    media_urls = models.JSONField(default=list, help_text="Typed download URLs: kind, url, index")
     cover_url = models.CharField(max_length=2000, default="")
     create_time = models.DateTimeField(null=True, blank=True, help_text="Video publish time from Douyin")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -96,12 +107,41 @@ class DyVideo(models.Model):
     def __str__(self):
         return f"{self.name} ({self.vid})"
     
+    def _media_file_valid(self, relative_path: str) -> bool:
+        full_path = os.path.join(settings.MEDIA_ROOT, self.path, relative_path)
+        return os.path.isfile(full_path) and os.path.getsize(full_path) > 0
+
+    def _dir_has_files(self, relative_dir: str, extensions: tuple) -> bool:
+        dir_path = os.path.join(settings.MEDIA_ROOT, self.path, relative_dir)
+        if not os.path.isdir(dir_path):
+            return False
+        for name in os.listdir(dir_path):
+            if name.startswith("."):
+                continue
+            if any(name.lower().endswith(ext) for ext in extensions):
+                full_path = os.path.join(dir_path, name)
+                if os.path.isfile(full_path) and os.path.getsize(full_path) > 0:
+                    return True
+        return False
+
+    def compute_valid(self) -> bool:
+        if not self.path:
+            return False
+        if self.content_type == ContentType.VIDEO:
+            return self._media_file_valid("video.mp4")
+        cover_ok = self._media_file_valid("cover.jpg")
+        music_ok = self._media_file_valid("music.mp3")
+        if self.content_type == ContentType.PHOTO_SLIDES:
+            images_ok = self._dir_has_files("images", (".jpg", ".jpeg", ".webp", ".png"))
+            return cover_ok and images_ok and music_ok
+        if self.content_type == ContentType.VIDEO_SLIDES:
+            clips_ok = self._dir_has_files("clips", (".mp4",))
+            return cover_ok and clips_ok and music_ok
+        return False
+
     def save(self, *args, **kwargs):
-        # Update valid status based on file existence
-        play_src = os.path.join(settings.MEDIA_ROOT, self.path, "video.mp4")
         if not self.valid:
-        # only update validity while it's not valid
-            self.valid = os.path.isfile(play_src) and os.path.getsize(play_src) > 0
+            self.valid = self.compute_valid()
         super().save(*args, **kwargs)
 
 

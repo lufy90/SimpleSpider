@@ -30,7 +30,7 @@ class Command(BaseCommand):
                 created_at__gte=time_threshold,
                 status=Status.WAITING,
             )
-            .exclude(origin_url="")
+            .exclude(media_urls=[])
             .order_by("created_at", "id")
             .values_list("id", flat=True)[:batch_size]
         )
