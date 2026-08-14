@@ -35,6 +35,8 @@ import com.simplespider.dy.data.DyVideoDto
 import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.RatePatchBody
 import com.simplespider.dy.data.TokenStore
+import com.simplespider.dy.ui.AuthorDetailVideoFeedHolder
+import com.simplespider.dy.ui.VideosFeedHoist
 import com.simplespider.dy.ui.components.RateStarsRow
 import kotlinx.coroutines.launch
 
@@ -43,20 +45,29 @@ fun AuthorDetailScreen(
     modifier: Modifier = Modifier,
     authorId: Int,
     tokenStore: TokenStore,
+    videoFeedHolder: AuthorDetailVideoFeedHolder,
     onBack: () -> Unit,
     onVideoClick: (DyVideoDto, List<DyVideoDto>, Int, PlayerPlaylistHolder.PlaylistPagination?) -> Unit,
 ) {
+    val videoFeed = remember(authorId) {
+        videoFeedHolder.restoreOrNull(authorId) ?: VideosFeedHoist()
+    }
     var author by remember { mutableStateOf<DyAuthorDto?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var authorRateBusy by remember { mutableStateOf(false) }
-    var videoTotal by remember { mutableIntStateOf(0) }
+    var videoTotal by remember(authorId) { mutableIntStateOf(videoFeed.loadedCount) }
     val scope = rememberCoroutineScope()
+
+    fun leaveDetail() {
+        videoFeedHolder.clear()
+        onBack()
+    }
 
     LaunchedEffect(authorId) {
         loading = true
         error = null
-        videoTotal = 0
+        videoTotal = videoFeed.loadedCount
         try {
             author = ApiClient.api.getAuthor(authorId)
         } catch (e: Exception) {
@@ -66,7 +77,7 @@ fun AuthorDetailScreen(
         }
     }
 
-    BackHandler { onBack() }
+    BackHandler { leaveDetail() }
 
     when {
         loading -> Box(
@@ -143,7 +154,11 @@ fun AuthorDetailScreen(
                     modifier = Modifier.weight(1f),
                     tokenStore = tokenStore,
                     authorId = authorId,
-                    onVideoClick = onVideoClick,
+                    mainTabFeed = videoFeed,
+                    onVideoClick = { video, playlist, index, pagination ->
+                        videoFeedHolder.retainForPlayer(authorId, videoFeed)
+                        onVideoClick(video, playlist, index, pagination)
+                    },
                     onVideoCountUpdate = { videoTotal = it },
                 )
             }
