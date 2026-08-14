@@ -6,7 +6,7 @@ import time
 from typing import List, Dict, Any, Optional
 from playwright.sync_api import sync_playwright
 from django.conf import settings
-from .models import DyVideo, Status, DyAuthor
+from .models import DyVideo, Status, DyAuthor, ContentType
 from playwright.sync_api import Response
 import queue
 from concurrent.futures import ThreadPoolExecutor
@@ -184,6 +184,81 @@ def format_author_data(api_data: Dict[str, Any]) -> Dict[str, Any]:
     
     return formatted
 
+def _pick_url(url_list: List[str], prefer_last: bool = False) -> Optional[str]:
+    if not url_list:
+        return None
+    return url_list[-1] if prefer_last else url_list[0]
+
+def _is_mp3_url(url: str) -> bool:
+    lowered = (url or "").lower()
+    return lowered.endswith(".mp3") or "/ies-music/" in lowered
+
+def _image_has_nested_clip(img: Dict[str, Any]) -> bool:
+    if not isinstance(img, dict):
+        return False
+    nested = img.get("video") or {}
+    play_urls = (nested.get("play_addr") or {}).get("url_list") or []
+    if play_urls:
+        return True
+    return img.get("clip_type") in (3, 5)
+
+def _images_have_nested_clips(api_data: Dict[str, Any]) -> bool:
+    for img in api_data.get("images") or []:
+        if _image_has_nested_clip(img):
+            return True
+    return False
+
+def _detect_content_type(api_data: Dict[str, Any]) -> str:
+    images = api_data.get("images")
+    has_images = isinstance(images, list) and len(images) > 0
+    if api_data.get("aweme_type") == 68 or has_images:
+        if _images_have_nested_clips(api_data):
+            return ContentType.VIDEO_SLIDES
+        return ContentType.PHOTO_SLIDES
+    return ContentType.VIDEO
+
+def _extract_music_url(api_data: Dict[str, Any]) -> Optional[str]:
+    music = api_data.get("music") or {}
+    play_url = music.get("play_url") or {}
+    url = _pick_url(play_url.get("url_list") or [])
+    if url:
+        return url
+    video_info = api_data.get("video") or {}
+    play_addr = video_info.get("play_addr") or {}
+    url = _pick_url(play_addr.get("url_list") or [], prefer_last=True)
+    if url and _is_mp3_url(url):
+        return url
+    return None
+
+def _build_media_urls(api_data: Dict[str, Any], content_type: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    if content_type == ContentType.VIDEO:
+        video_info = api_data.get("video") or {}
+        play_addr = video_info.get("play_addr") or {}
+        url = _pick_url(play_addr.get("url_list") or [], prefer_last=True)
+        if url and not _is_mp3_url(url):
+            items.append({"kind": "video", "url": url, "index": 0})
+        return items
+
+    for idx, img in enumerate(api_data.get("images") or []):
+        if not isinstance(img, dict):
+            continue
+        if _image_has_nested_clip(img):
+            nested = img.get("video") or {}
+            play_addr = nested.get("play_addr") or {}
+            url = _pick_url(play_addr.get("url_list") or [], prefer_last=True)
+            if url:
+                items.append({"kind": "clip", "url": url, "index": idx})
+        else:
+            url = _pick_url(img.get("url_list") or [])
+            if url:
+                items.append({"kind": "image", "url": url, "index": idx})
+
+    music_url = _extract_music_url(api_data)
+    if music_url:
+        items.append({"kind": "music", "url": music_url, "index": 0})
+    return items
+
 def format_video_data(api_data: Dict[str, Any], author=None, video_path: str = None) -> Dict[str, Any]:
     """
     Format API response data to DyVideo model fields.
@@ -216,20 +291,22 @@ def format_video_data(api_data: Dict[str, Any], author=None, video_path: str = N
         formatted['name'] = api_data['desc'][:255] if api_data['desc'] else ''
     elif 'share_info' in api_data and 'share_title' in api_data['share_info']:
         formatted['name'] = api_data['share_info']['share_title'][:255]
-    
-    # Handle video URLs
-    if 'video' in api_data:
-        video_info = api_data['video']
-        if 'play_addr' in video_info and 'url_list' in video_info['play_addr']:
-            url_list = video_info['play_addr']['url_list']
-            if url_list:
-                formatted['origin_url'] = url_list[-1]
-    
+
+    content_type = _detect_content_type(api_data)
+    formatted['content_type'] = content_type
+    formatted['media_urls'] = _build_media_urls(api_data, content_type)
+
     # Handle cover image
     if 'video' in api_data and 'cover' in api_data['video']:
         cover_info = api_data['video']['cover']
         if 'url_list' in cover_info and cover_info['url_list']:
             formatted['cover_url'] = cover_info['url_list'][0]
+    if not formatted.get('cover_url'):
+        images = api_data.get('images') or []
+        if images and isinstance(images[0], dict):
+            first_url = _pick_url(images[0].get('url_list') or [])
+            if first_url:
+                formatted['cover_url'] = first_url
     
     # Handle author information
     if author:
@@ -246,9 +323,9 @@ def format_video_data(api_data: Dict[str, Any], author=None, video_path: str = N
     # Set path if provided
     if video_path:
         formatted['path'] = video_path
-    # Handle video size
-    if 'video' in api_data and 'play_addr' in api_data['video']:
-        play_addr = api_data['video']['play_addr']
+    # Handle video size (main video only)
+    if content_type == ContentType.VIDEO and 'video' in api_data:
+        play_addr = api_data['video'].get('play_addr') or {}
         if 'data_size' in play_addr:
             formatted['size'] = play_addr['data_size']
     
@@ -771,18 +848,22 @@ def save_data(item:dict={}):
             try:
                 video = DyVideo.objects.filter(vid=vid).first()
                 if video:
-                    update_fields = []
+                    update_fields = [
+                        "media_urls",
+                        "content_type",
+                        "cover_url",
+                        "updated_at",
+                    ]
+                    video.media_urls = video_data.get("media_urls") or []
+                    video.content_type = video_data.get("content_type", ContentType.VIDEO)
+                    video.cover_url = video_data.get("cover_url") or video.cover_url
                     if not video.valid:
-                        video.origin_url = video_data.get("origin_url")
-                        video.cover_url = video_data.get("cover_url")
-                        # Ensure video is pending for independent download worker.
                         video.status = Status.WAITING
-                        update_fields.extend(["origin_url", "cover_url", "status"])
+                        update_fields.append("status")
                     if video_data.get("create_time") and not video.create_time:
                         video.create_time = video_data["create_time"]
                         update_fields.append("create_time")
-                    if update_fields:
-                        video.save(update_fields=update_fields + ["updated_at"])
+                    video.save(update_fields=update_fields)
                 else:
                     # Set status explicitly to avoid relying on implicit defaults.
                     # This prevents NOT NULL issues if incoming payload contains empty status.
@@ -994,17 +1075,43 @@ def crawl_authors_batch(aids, **kwargs):
 
 def download_videos(video_ids, max_workers=3, **kwargs):
     """
-    Download video.mp4 and cover.jpg using ThreadPoolExecutor.
+    Download media files listed in DyVideo.media_urls plus cover.jpg.
     """
-    # Fetch video objects from IDs
     videos = DyVideo.objects.filter(id__in=video_ids)
     results = []
 
+    kind_to_path = {
+        "video": lambda index: "video.mp4",
+        "clip": lambda index: f"clips/{index:03d}.mp4",
+        "image": lambda index: f"images/{index:03d}.jpg",
+        "music": lambda index: "music.mp3",
+    }
+
     def download_one(video):
         save_to = os.path.join(DATADIR, video.path)
-        video_result = download_media(
-            video.origin_url, save_to, "video.mp4", **kwargs
-        )
+        media_results = []
+        status = "success"
+        messages = []
+
+        for item in video.media_urls or []:
+            kind = item.get("kind")
+            url = item.get("url")
+            index = item.get("index", 0)
+            if not kind or not url:
+                status = "error"
+                messages.append(f"invalid media item: {item}")
+                continue
+            path_fn = kind_to_path.get(kind)
+            if not path_fn:
+                status = "error"
+                messages.append(f"unknown media kind: {kind}")
+                continue
+            filename = path_fn(index)
+            result = download_media(url, save_to, filename, **kwargs)
+            media_results.append({"kind": kind, "index": index, "result": result})
+            if result.get("status") != "success":
+                status = "error"
+                messages.append(f"{kind}[{index}]: {result.get('message', 'unknown error')}")
 
         if not video.cover_url:
             cover_result = {
@@ -1016,23 +1123,15 @@ def download_videos(video_ids, max_workers=3, **kwargs):
             cover_result = download_media(
                 video.cover_url, save_to, "cover.jpg", **kwargs
             )
-
-        status = "success"
-        messages = []
-        if video_result.get("status") != "success":
-            status = "error"
-            messages.append(f"video: {video_result.get('message', 'unknown error')}")
         if cover_result.get("status") != "success":
             status = "error"
             messages.append(f"cover: {cover_result.get('message', 'unknown error')}")
 
-        if status == "success":
-            video.status = "ready"
-        else:
-            video.status = "error"
+        if not (video.media_urls or []):
+            status = "error"
+            messages.append("media_urls is empty")
 
-        # Refresh validity by local file state through model save().
-        # DyVideo.save() computes valid based on MEDIA_ROOT/path/video.mp4 existence.
+        video.status = Status.READY if status == "success" else Status.ERROR
         try:
             video.save(update_fields=["valid", "updated_at", "status"])
         except Exception as e:
@@ -1043,7 +1142,7 @@ def download_videos(video_ids, max_workers=3, **kwargs):
             "message": "Downloaded successfully" if status == "success" else "; ".join(messages),
             "video_id": video.id,
             "video_path": video.path,
-            "video_result": video_result,
+            "media_results": media_results,
             "cover_result": cover_result,
         }
 
