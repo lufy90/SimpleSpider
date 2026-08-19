@@ -74,6 +74,7 @@ import com.simplespider.dy.data.cursorFromPaginationLink
 import com.simplespider.dy.data.hasMoreFromPaginationLink
 import com.simplespider.dy.data.formatVideoDateTime
 import com.simplespider.dy.data.VideoEndAction
+import com.simplespider.dy.data.VideoPlaybackCache
 import com.simplespider.dy.data.PlaySrcSlideDto
 import com.simplespider.dy.data.SlideShowPlayback
 import com.simplespider.dy.data.isPlayable
@@ -106,7 +107,7 @@ fun VideoPlayerScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
-    val player = remember {
+    val player: ExoPlayer = remember(context) {
         VideoPlaybackCache.createPlayer(context)
     }
     DisposableEffect(player) {
@@ -125,6 +126,16 @@ fun VideoPlayerScreen(
     var slideShowActive by remember { mutableStateOf(false) }
     val slideShowActiveState = rememberUpdatedState(slideShowActive)
     var activeSlide by remember { mutableStateOf<PlaySrcSlideDto?>(null) }
+
+    val entryList = remember {
+        mutableStateListOf<PlayerPlaylistHolder.Entry>().apply { addAll(initialEntries) }
+    }
+
+    val safeStart = initialIndex.coerceIn(0, (entryList.size - 1).coerceAtLeast(0))
+    val pagerState = rememberPagerState(
+        initialPage = safeStart,
+        pageCount = { max(1, entryList.size) },
+    )
 
     fun advanceOnPlaybackEnd() {
         scope.launch {
@@ -148,16 +159,6 @@ fun VideoPlayerScreen(
             }
         }
     }
-
-    val entryList = remember {
-        mutableStateListOf<PlayerPlaylistHolder.Entry>().apply { addAll(initialEntries) }
-    }
-
-    val safeStart = initialIndex.coerceIn(0, (entryList.size - 1).coerceAtLeast(0))
-    val pagerState = rememberPagerState(
-        initialPage = safeStart,
-        pageCount = { max(1, entryList.size) },
-    )
 
     var loadingNextPage by remember { mutableStateOf(false) }
     var loadingPreviousPage by remember { mutableStateOf(false) }
@@ -270,13 +271,13 @@ fun VideoPlayerScreen(
             .collectLatest { (_, id, playSrc) ->
                 activeSlide = null
                 slideShowActive = false
-                if (id == null || playSrc == null || !playSrc.isPlayable()) return@collect
+                if (id == null || playSrc == null || !playSrc.isPlayable()) return@collectLatest
 
                 if (playSrc.isVideoContent()) {
                     player.setMediaItem(MediaItem.fromUri(playSrc.video!!), /* resetPosition= */ true)
                     player.prepare()
                     player.playWhenReady = true
-                    return@collect
+                    return@collectLatest
                 }
 
                 if (playSrc.isSlidesContent()) {
