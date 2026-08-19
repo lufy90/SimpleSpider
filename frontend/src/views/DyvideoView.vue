@@ -267,7 +267,7 @@
     <el-drawer v-model="drawer" :title="drawerTitle">
       <el-descriptions :column="1" border>
         <el-descriptions-item v-for="(v, k) in drawerContent" :label="k" :key="k">
-          <el-link v-if="k === 'Play URL' && v && v !== '-'" :href="v" type="primary" target="_blank">{{ v }}</el-link>
+          <span v-if="k === 'Play URL' && v && v !== '-'" class="play-url-text">{{ v }}</span>
           <span v-else>{{ v }}</span>
         </el-descriptions-item>
       </el-descriptions>
@@ -294,6 +294,7 @@ import { ElMessageBox } from 'element-plus'
 import { ajax } from '@/utils/request'
 import { timeOption } from '@/config'
 import VideoPreview from '@/components/VideoPreview.vue'
+import { primaryOpenUrl, formatPlaySrcDisplay } from '@/utils/playSrc'
 
 const defaultCover = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="20" height="20"%3E%3Crect width="20" height="20" fill="%23ddd"/%3E%3C/svg%3E'
 
@@ -377,8 +378,9 @@ const getTableHeight = () => {
 }
 
 const openVideoInNewTab = (data) => {
-  if (data.play_src) {
-    window.open(data.play_src, '_blank')
+  const url = primaryOpenUrl(data.play_src)
+  if (url) {
+    window.open(url, '_blank')
   } else {
     ElMessage.warning('No playable source')
   }
@@ -450,7 +452,7 @@ const showDrawerFn = (item, flag) => {
     'Author Name': item.author_name || '-',
     'Author ID': item.author || '-',
     Path: item.path || '-',
-    'Play URL': item.play_src || '-',
+    'Play URL': formatPlaySrcDisplay(item.play_src),
     Rate: item.rate || 0,
     'Is Like': item.is_like ? 'Yes' : 'No',
     Favor: item.is_favor ? 'Yes' : 'No',
@@ -672,6 +674,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.play-url-text {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 13px;
+}
+
 .name-cell {
   display: flex;
   align-items: center;

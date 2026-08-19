@@ -27,11 +27,41 @@
           </button>
 
           <div class="video-preview-content">
-            <template v-if="currentVideo && currentVideo.play_src">
+            <template v-if="currentVideo && isPlayable(currentVideo.play_src)">
+              <template v-if="isSlidesMode">
+                <div class="video-preview-slides">
+                  <img
+                    v-if="currentSlide?.kind === 'image'"
+                    :key="`img-${currentSlide.index}`"
+                    :src="currentSlide.url"
+                    class="video-preview-slide-image"
+                    alt=""
+                  />
+                  <video
+                    v-else-if="currentSlide?.kind === 'clip'"
+                    ref="clipRef"
+                    :key="`clip-${currentSlide.index}`"
+                    :src="currentSlide.url"
+                    class="video-preview-player"
+                    autoplay
+                    @ended="onClipEnded"
+                  />
+                  <audio
+                    ref="audioRef"
+                    :src="slidesMusicUrl"
+                    autoplay
+                    @ended="onSlidesFinished"
+                  />
+                </div>
+                <div v-if="slideCount > 0" class="video-preview-slide-counter">
+                  {{ slideIndex + 1 }} / {{ slideCount }}
+                </div>
+              </template>
               <video
+                v-else
                 ref="videoRef"
                 :key="currentIndex"
-                :src="currentVideo.play_src"
+                :src="videoUrl"
                 class="video-preview-player"
                 controls
                 autoplay
@@ -68,8 +98,15 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { Close, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
+import {
+  normalizePlaySrc,
+  isPlayable,
+  isSlidesPlaySrc,
+} from '@/utils/playSrc'
+
+const IMAGE_SLIDE_MS = 3000
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -83,8 +120,12 @@ const props = defineProps({
 const emit = defineEmits(['close', 'load-more'])
 
 const videoRef = ref(null)
+const audioRef = ref(null)
+const clipRef = ref(null)
 const currentIndex = ref(0)
 const waitingForMore = ref(false)
+const slideIndex = ref(0)
+let imageSlideTimer = null
 
 const clampIndex = (index) => {
   const max = Math.max(0, props.videos.length - 1)
@@ -96,6 +137,20 @@ const currentVideo = computed(() => {
   if (!list.length) return null
   return list[clampIndex(currentIndex.value)]
 })
+
+const normalizedPlaySrc = computed(() => normalizePlaySrc(currentVideo.value?.play_src))
+
+const isSlidesMode = computed(() => isSlidesPlaySrc(currentVideo.value?.play_src))
+
+const videoUrl = computed(() => normalizedPlaySrc.value?.video || '')
+
+const slides = computed(() => normalizedPlaySrc.value?.slides || [])
+
+const slideCount = computed(() => slides.value.length)
+
+const slidesMusicUrl = computed(() => normalizedPlaySrc.value?.music || '')
+
+const currentSlide = computed(() => slides.value[slideIndex.value] || null)
 
 const atLoadedEnd = computed(
   () => props.videos.length > 0 && currentIndex.value >= props.videos.length - 1
@@ -116,6 +171,60 @@ const displayTotal = computed(() => {
   return props.videos.length
 })
 
+function clearImageSlideTimer() {
+  if (imageSlideTimer != null) {
+    clearTimeout(imageSlideTimer)
+    imageSlideTimer = null
+  }
+}
+
+function stopSlidePlayback() {
+  clearImageSlideTimer()
+  audioRef.value?.pause()
+  clipRef.value?.pause()
+}
+
+function onSlidesFinished() {
+  if (slideCount.value === 0) {
+    onVideoEnded()
+  }
+}
+
+function advanceSlide() {
+  clearImageSlideTimer()
+  if (slideIndex.value < slideCount.value - 1) {
+    slideIndex.value++
+    scheduleCurrentSlide()
+    return
+  }
+  onVideoEnded()
+}
+
+function onClipEnded() {
+  advanceSlide()
+}
+
+function scheduleCurrentSlide() {
+  clearImageSlideTimer()
+  const slide = currentSlide.value
+  if (!slide) {
+    onVideoEnded()
+    return
+  }
+  if (slide.kind === 'image') {
+    imageSlideTimer = setTimeout(() => {
+      advanceSlide()
+    }, IMAGE_SLIDE_MS)
+  }
+}
+
+function startSlidesPlayback() {
+  slideIndex.value = 0
+  clearImageSlideTimer()
+  if (slideCount.value === 0) return
+  scheduleCurrentSlide()
+}
+
 function maybePrefetch() {
   if (!props.hasMore || props.loadingMore || props.videos.length === 0) return
   const prefetchFrom = Math.max(0, props.videos.length - 2)
@@ -126,11 +235,13 @@ function maybePrefetch() {
 
 function goPrev() {
   if (!hasPrev.value) return
+  stopSlidePlayback()
   currentIndex.value--
 }
 
 function goNext() {
   if (hasNextInList.value) {
+    stopSlidePlayback()
     currentIndex.value++
     maybePrefetch()
     return
@@ -142,6 +253,7 @@ function goNext() {
 }
 
 function handleClose() {
+  stopSlidePlayback()
   waitingForMore.value = false
   emit('close')
 }
@@ -169,18 +281,43 @@ function onKeydown(e) {
 }
 
 watch(
+  () => currentSlide.value,
+  (slide) => {
+    if (!props.visible || !isSlidesMode.value) return
+    if (slide?.kind === 'clip') {
+      audioRef.value?.pause()
+    } else if (slide?.kind === 'image' && slidesMusicUrl.value) {
+      audioRef.value?.play().catch(() => {})
+    }
+  }
+)
+
+watch(
   () => props.visible,
   (v) => {
     if (v) {
       currentIndex.value = clampIndex(props.initialIndex)
       waitingForMore.value = false
+      slideIndex.value = 0
       document.addEventListener('keydown', onKeydown)
       document.body.style.overflow = 'hidden'
       maybePrefetch()
     } else {
+      stopSlidePlayback()
       waitingForMore.value = false
       document.removeEventListener('keydown', onKeydown)
       document.body.style.overflow = ''
+    }
+  }
+)
+
+watch(
+  () => [currentIndex.value, isSlidesMode.value, props.visible],
+  () => {
+    if (!props.visible) return
+    stopSlidePlayback()
+    if (isSlidesMode.value) {
+      startSlidesPlayback()
     }
   }
 )
@@ -213,6 +350,10 @@ watch(
     }
   }
 )
+
+onBeforeUnmount(() => {
+  stopSlidePlayback()
+})
 </script>
 
 <style scoped>
@@ -312,12 +453,26 @@ watch(
   max-height: 90vh;
 }
 
-.video-preview-player {
+.video-preview-slides {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-preview-player,
+.video-preview-slide-image {
   max-width: 90vw;
   max-height: 85vh;
   object-fit: contain;
   background: #000;
   border-radius: 4px;
+}
+
+.video-preview-slide-counter {
+  margin-top: 8px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
 }
 
 .video-preview-title {
