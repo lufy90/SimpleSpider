@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.DyVideoDto
+import com.simplespider.dy.data.isPlayable
 import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.TokenStore
 import com.simplespider.dy.data.VideoListQueryParams
@@ -311,7 +312,7 @@ fun VideosScreen(
                             onOpen = {
                                 scope.launch {
                                     val q = videoListFiltersForRequest()
-                                    val playable = feed.items.filter { !it.playSrc.isNullOrBlank() }
+                                    val playable = feed.items.filter { it.playSrc.isPlayable() }
                                     val idx = playable.indexOfFirst { it.id == video.id }
                                     if (idx >= 0) {
                                         val pagination = PlayerPlaylistHolder.PlaylistPagination(

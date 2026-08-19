@@ -128,7 +128,7 @@
     <el-drawer v-model="drawer" :title="drawerTitle">
       <el-descriptions :column="1" border>
         <el-descriptions-item v-for="(v, k) in drawerContent" :label="k" :key="k">
-          <el-link v-if="k === 'Play URL' && v && v !== '-'" :href="v" type="primary" target="_blank">{{ v }}</el-link>
+          <span v-if="k === 'Play URL' && v && v !== '-'" class="play-url-text">{{ v }}</span>
           <span v-else>{{ v }}</span>
         </el-descriptions-item>
       </el-descriptions>
@@ -144,6 +144,7 @@ import { Star, StarFilled, InfoFilled, Delete, Download, MoreFilled } from '@ele
 import { ajax } from '@/utils/request'
 import { timeOption } from '@/config'
 import VideoPreview from '@/components/VideoPreview.vue'
+import { formatPlaySrcDisplay } from '@/utils/playSrc'
 
 const DOUYIN_USER_BASE = 'https://www.douyin.com/user/'
 
@@ -363,7 +364,7 @@ const showDrawerFn = (item, flag) => {
     'Author Name': item.author_name || authorData.value?.name || '-',
     'Author ID': item.author || authorData.value?.id || '-',
     Path: item.path || '-',
-    'Play URL': item.play_src || '-',
+    'Play URL': formatPlaySrcDisplay(item.play_src),
     Rate: item.rate || 0,
     'Is Like': item.is_like ? 'Yes' : 'No',
     Favor: item.is_favor ? 'Yes' : 'No',
@@ -423,6 +424,12 @@ watch(() => route.params.id, () => {
 </script>
 
 <style scoped>
+.play-url-text {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 13px;
+}
+
 .dyauthor-detail-container {
   padding: 20px;
 }

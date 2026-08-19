@@ -973,7 +973,7 @@ def download_media(url, path, name, **kwargs):
     impersonate = kwargs.get("impersonate", "chrome131")
     use_stream = kwargs.get("size", 0) > 1048576
 
-    os.makedirs(path, exist_ok=True)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
     if os.path.isfile(full_path):
         return {"status": "success", "message": "File already exists", "path": full_path}

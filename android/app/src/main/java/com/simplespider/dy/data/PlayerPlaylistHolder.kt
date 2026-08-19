@@ -7,7 +7,7 @@ object PlayerPlaylistHolder {
     data class Entry(
         val id: Int,
         val title: String,
-        val playUrl: String,
+        val playSrc: PlaySrcDto?,
         val authorId: Int?,
         val authorAvatarSrc: String?,
         val rate: Float? = null,
@@ -37,13 +37,12 @@ object PlayerPlaylistHolder {
     private var heldPagination: PlaylistPagination? = null
 
     fun entryFromVideo(v: DyVideoDto): Entry {
-        val url = v.playSrc?.trim().orEmpty()
         val fromApi = v.authorAvatarSrc?.trim()?.takeIf { it.isNotEmpty() }
-        val avatar = fromApi ?: avatarUrlFromVideoPlayUrl(url)
+        val avatar = fromApi ?: avatarUrlFromPlaySrc(v.playSrc)
         return Entry(
             id = v.id,
             title = videoTitle(v),
-            playUrl = url,
+            playSrc = v.playSrc,
             authorId = v.author,
             authorAvatarSrc = avatar,
             rate = v.rate,

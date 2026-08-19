@@ -74,10 +74,16 @@ import com.simplespider.dy.data.cursorFromPaginationLink
 import com.simplespider.dy.data.hasMoreFromPaginationLink
 import com.simplespider.dy.data.formatVideoDateTime
 import com.simplespider.dy.data.VideoEndAction
-import com.simplespider.dy.data.VideoPlaybackCache
+import com.simplespider.dy.data.PlaySrcSlideDto
+import com.simplespider.dy.data.SlideShowPlayback
+import com.simplespider.dy.data.isPlayable
+import com.simplespider.dy.data.isSlidesContent
+import com.simplespider.dy.data.isVideoContent
+import com.simplespider.dy.data.prefetchUrl
 import com.simplespider.dy.ui.components.RateStarsRow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -111,8 +117,36 @@ fun VideoPlayerScreen(
     }
 
     var endAction by remember { mutableStateOf(VideoEndAction.PLAY_NEXT) }
+    val endActionState = rememberUpdatedState(endAction)
     LaunchedEffect(tokenStore) {
         tokenStore.videoEndActionFlow.collect { endAction = it }
+    }
+
+    var slideShowActive by remember { mutableStateOf(false) }
+    val slideShowActiveState = rememberUpdatedState(slideShowActive)
+    var activeSlide by remember { mutableStateOf<PlaySrcSlideDto?>(null) }
+
+    fun advanceOnPlaybackEnd() {
+        scope.launch {
+            when (endActionState.value) {
+                VideoEndAction.REPLAY_CURRENT -> {
+                    player.seekTo(0)
+                    player.prepare()
+                    player.play()
+                }
+                VideoEndAction.PLAY_NEXT -> {
+                    if (entryList.size <= 1) {
+                        player.seekTo(0)
+                        player.prepare()
+                        player.play()
+                    } else {
+                        val cur = pagerState.settledPage
+                        val next = if (cur < entryList.lastIndex) cur + 1 else 0
+                        pagerState.scrollToPage(next)
+                    }
+                }
+            }
+        }
     }
 
     val entryList = remember {
@@ -171,7 +205,7 @@ fun VideoPlayerScreen(
                             }
                             val existing = entryList.map { it.id }.toSet()
                             val appended = raw
-                                .filter { !it.playSrc.isNullOrBlank() && it.id !in existing }
+                                .filter { it.playSrc.isPlayable() && it.id !in existing }
                                 .map { PlayerPlaylistHolder.entryFromVideo(it) }
                             if (appended.isNotEmpty()) {
                                 entryList.addAll(appended)
@@ -204,7 +238,7 @@ fun VideoPlayerScreen(
                             }
                             val existing = entryList.map { it.id }.toSet()
                             val prepended = raw
-                                .filter { !it.playSrc.isNullOrBlank() && it.id !in existing }
+                                .filter { it.playSrc.isPlayable() && it.id !in existing }
                                 .map { PlayerPlaylistHolder.entryFromVideo(it) }
                             if (prepended.isNotEmpty()) {
                                 val added = prepended.size
@@ -230,14 +264,39 @@ fun VideoPlayerScreen(
         snapshotFlow {
             val page = pagerState.settledPage
             val entry = entryList.getOrNull(page)
-            Triple(page, entry?.id, entry?.playUrl)
+            Triple(page, entry?.id, entry?.playSrc)
         }
             .distinctUntilChanged()
-            .collect { (_, id, playUrl) ->
-                if (id == null || playUrl.isNullOrBlank()) return@collect
-                player.setMediaItem(MediaItem.fromUri(playUrl), /* resetPosition= */ true)
-                player.prepare()
-                player.playWhenReady = true
+            .collectLatest { (_, id, playSrc) ->
+                activeSlide = null
+                slideShowActive = false
+                if (id == null || playSrc == null || !playSrc.isPlayable()) return@collect
+
+                if (playSrc.isVideoContent()) {
+                    player.setMediaItem(MediaItem.fromUri(playSrc.video!!), /* resetPosition= */ true)
+                    player.prepare()
+                    player.playWhenReady = true
+                    return@collect
+                }
+
+                if (playSrc.isSlidesContent()) {
+                    slideShowActive = true
+                    try {
+                        SlideShowPlayback.run(
+                            player = player,
+                            playSrc = playSrc,
+                            onSlideChanged = { activeSlide = it },
+                            onFinished = {
+                                slideShowActive = false
+                                activeSlide = null
+                                advanceOnPlaybackEnd()
+                            },
+                        )
+                    } finally {
+                        slideShowActive = false
+                        activeSlide = null
+                    }
+                }
             }
     }
 
@@ -249,7 +308,7 @@ fun VideoPlayerScreen(
                 prefetchJob?.cancel()
                 VideoPlaybackCache.cancelPrefetch()
                 val urls = (1..VideoPlaybackCache.PREFETCH_AHEAD_COUNT).mapNotNull { offset ->
-                    entryList.getOrNull(page + offset)?.playUrl?.takeIf { it.isNotBlank() }
+                    entryList.getOrNull(page + offset)?.playSrc?.prefetchUrl()
                 }
                 if (urls.isEmpty()) return@collect
                 prefetchJob = launch {
@@ -279,26 +338,8 @@ fun VideoPlayerScreen(
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState != Player.STATE_ENDED) return
-                scope.launch {
-                    when (endAction) {
-                        VideoEndAction.REPLAY_CURRENT -> {
-                            player.seekTo(0)
-                            player.prepare()
-                            player.play()
-                        }
-                        VideoEndAction.PLAY_NEXT -> {
-                            if (entryList.size <= 1) {
-                                player.seekTo(0)
-                                player.prepare()
-                                player.play()
-                            } else {
-                                val cur = pagerState.settledPage
-                                val next = if (cur < entryList.lastIndex) cur + 1 else 0
-                                pagerState.scrollToPage(next)
-                            }
-                        }
-                    }
-                }
+                if (slideShowActiveState.value) return
+                advanceOnPlaybackEnd()
             }
         }
         player.addListener(listener)
@@ -373,6 +414,15 @@ fun VideoPlayerScreen(
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        activeSlide?.takeIf { it.kind == "image" }?.let { slide ->
+            AsyncImage(
+                model = slide.url,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
 
         VerticalPager(
             state = pagerState,

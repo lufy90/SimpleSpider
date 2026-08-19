@@ -50,7 +50,7 @@ data class DyVideoDto(
     val desc: String?,
     val path: String?,
     @SerializedName("cover_src") val coverSrc: String?,
-    @SerializedName("play_src") val playSrc: String?,
+    @SerializedName("play_src") val playSrc: PlaySrcDto?,
     @SerializedName("author_name") val authorName: String?,
     val author: Int?,
     val rate: Float?,
