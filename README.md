@@ -232,7 +232,8 @@ cd backend
 # 快速模式：仅用 cover.jpg（默认只处理 rate=0 的视频）
 python manage.py auto_rate
 
-# 精确模式：从 video.mp4 抽帧后综合打分
+# 精确模式：从 video.mp4 或幻灯片媒体（images/clips）抽帧后综合打分
+# photo_slides / video_slides 在精确模式失败时会回退到 cover.jpg
 python manage.py auto_rate -p
 ```
 
