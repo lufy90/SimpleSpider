@@ -98,7 +98,7 @@ This is a Django REST API backend for the Douyin (TikTok) content management sys
 
 ### ONNX auto rating
 - `python manage.py auto_rate` (quick mode from `cover.jpg`)
-- `python manage.py auto_rate -p` (precise mode: average over N frames from `video.mp4`)
+- `python manage.py auto_rate -p` (precise mode: N frames from `video.mp4`, slide images, or clip MP4s; slide types fall back to `cover.jpg` on failure)
 
 ### Export training dataset
 - Export covers (recommended for training input):

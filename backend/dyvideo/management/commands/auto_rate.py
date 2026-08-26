@@ -1,7 +1,7 @@
 """
 Management command to auto-rate dyvideos using ONNX model.
 - Quick (default): predict from cover image only.
-- Precise (-p/--precise): extract N frames from video, predict each, use average rate (requires video.mp4).
+- Precise (-p/--precise): extract N frames from video or slide media; for slides, fall back to cover on failure.
 By default only un-rated dyvideos (rate==0) are processed; use -f to force re-rate all.
 """
 
@@ -11,12 +11,11 @@ import os
 from django.core.management.base import BaseCommand, CommandError
 from django.conf import settings as django_settings
 
-from dyvideo.models import DyVideo
+from dyvideo.models import ContentType, DyVideo
 from dyvideo.auto_rate import (
     DEFAULT_PRECISE_FRAME_COUNT,
     OnnxRatePredictor,
     get_cover_path,
-    get_video_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,7 +49,8 @@ def _parse_author_ids(values):
 
 class Command(BaseCommand):
     help = (
-        "Auto-rate dyvideos: quick (cover image) or precise (-p, N frames from video). "
+        "Auto-rate dyvideos: quick (cover image) or precise (-p, frames from video/slide media). "
+        "Precise mode falls back to cover for photo_slides/video_slides when slide scoring fails. "
         "Default: only rate=0. Use -f to force re-rate. You can also pass --vid to process a specific dyvideo."
     )
 
@@ -110,7 +110,8 @@ class Command(BaseCommand):
             "-p",
             "--precise",
             action="store_true",
-            help="Precise rating: extract N frames from video, predict each, use average rate (requires video.mp4).",
+            help="Precise rating: score N frames from video.mp4 or slide media (images/clips). "
+            "For photo_slides/video_slides, falls back to cover.jpg when precise scoring fails.",
         )
         parser.add_argument(
             "--frames",
@@ -251,34 +252,73 @@ class Command(BaseCommand):
         try:
             for video in to_process:
                 if precise:
-                    video_path = get_video_path(media_root, video.path)
-                    if not os.path.isfile(video_path):
-                        logger.warning("Video not found for id=%s path=%s", video.id, video.path)
-                        self.stdout.write(
-                            self.style.WARNING(f"  Skip id={video.id}: video not found {video_path}")
-                        )
-                        failed += 1
-                        continue
-                    try:
-                        def on_done(rates, val):
-                            r_str = "[" + ",".join(map(str, rates)) + "]"
-                            self.stdout.write(
-                                f"  id={video.id} path={video.path} {r_str}, max {val}."
-                            )
+                    is_slide_content = video.content_type in (
+                        ContentType.PHOTO_SLIDES,
+                        ContentType.VIDEO_SLIDES,
+                    )
+                    cover_path = get_cover_path(media_root, video.path)
 
-                        rate = predictor.predict_from_video_path(
-                            video_path,
+                    def on_done(rates, val):
+                        r_str = "[" + ",".join(map(str, rates)) + "]"
+                        self.stdout.write(
+                            f"  id={video.id} path={video.path} {r_str}, max {val}."
+                        )
+
+                    try:
+                        rate = predictor.predict_precise_for_dyvideo(
+                            video,
+                            media_root,
                             frame_count=frame_count,
                             on_precise_done=on_done,
                         )
+                        method = "precise(slides)" if is_slide_content else "precise"
                         video.rate = rate
                         video.is_auto_rated = True
                         video.save(update_fields=["rate", "is_auto_rated", "updated_at"])
                         updated += 1
+                        self.stdout.write(
+                            f"  id={video.id} path={video.path} -> rate={rate} ({method})"
+                        )
                     except Exception as e:
-                        logger.exception("Precise auto-rate failed for video id=%s: %s", video.id, e)
-                        self.stdout.write(self.style.ERROR(f"  id={video.id} error: {e}"))
-                        failed += 1
+                        if not is_slide_content:
+                            logger.exception(
+                                "Precise auto-rate failed for video id=%s: %s", video.id, e
+                            )
+                            self.stdout.write(self.style.ERROR(f"  id={video.id} error: {e}"))
+                            failed += 1
+                            continue
+                        logger.warning(
+                            "Precise auto-rate failed for slide id=%s, falling back to cover: %s",
+                            video.id,
+                            e,
+                        )
+                        if not os.path.isfile(cover_path):
+                            self.stdout.write(
+                                self.style.WARNING(
+                                    f"  Skip id={video.id}: precise failed and cover not found {cover_path}"
+                                )
+                            )
+                            failed += 1
+                            continue
+                        try:
+                            rate = predictor.predict_from_cover_path(cover_path)
+                            video.rate = rate
+                            video.is_auto_rated = True
+                            video.save(update_fields=["rate", "is_auto_rated", "updated_at"])
+                            updated += 1
+                            self.stdout.write(
+                                f"  id={video.id} path={video.path} -> rate={rate} (fallback(cover))"
+                            )
+                        except Exception as cover_error:
+                            logger.exception(
+                                "Cover fallback failed for video id=%s: %s",
+                                video.id,
+                                cover_error,
+                            )
+                            self.stdout.write(
+                                self.style.ERROR(f"  id={video.id} fallback error: {cover_error}")
+                            )
+                            failed += 1
                 else:
                     cover_path = get_cover_path(media_root, video.path)
                     if not os.path.isfile(cover_path):

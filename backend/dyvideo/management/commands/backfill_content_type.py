@@ -9,12 +9,16 @@ import os
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from dyvideo.models import DyVideo
+from dyvideo.models import ContentType, DyVideo
 from dyvideo.utils import format_video_data
 
 
 class Command(BaseCommand):
-    help = "Backfill content_type and media_urls from info.json on disk"
+    help = (
+        "Backfill content_type and media_urls from info.json on disk. "
+        "By default skips photo_slides/video_slides; use --force for full scan. "
+        "Resume with --after-id."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -28,27 +32,93 @@ class Command(BaseCommand):
             default="",
             help="Only backfill a single aweme vid",
         )
+        parser.add_argument(
+            "-f",
+            "--force",
+            action="store_true",
+            help="Reprocess all content types including photo_slides and video_slides",
+        )
+        parser.add_argument(
+            "--after-id",
+            type=int,
+            default=None,
+            help="Resume after this DyVideo id (process rows with id greater than N)",
+        )
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
         only_vid = options["vid"].strip()
-
-        queryset = DyVideo.objects.all().order_by("id")
+        force = options["force"]
+        after_id = options["after_id"]
+        base_queryset = DyVideo.objects.all()
         if only_vid:
-            queryset = queryset.filter(vid=only_vid)
+            base_queryset = base_queryset.filter(vid=only_vid)
+
+        total_candidates = base_queryset.count()
+        prefilter_skipped_slides = 0
+        if force:
+            queryset = base_queryset
+        else:
+            slide_types = [ContentType.PHOTO_SLIDES, ContentType.VIDEO_SLIDES]
+            prefilter_skipped_slides = base_queryset.filter(
+                content_type__in=slide_types
+            ).count()
+            queryset = base_queryset.exclude(content_type__in=slide_types)
+
+        resume_before_id = None
+        if after_id is not None:
+            resume_before_id = after_id
+            queryset = queryset.filter(id__gt=after_id)
+
+        queryset = queryset.order_by("id")
+        to_process = queryset.count()
+
+        mode_parts = []
+        if force:
+            mode_parts.append("force")
+        else:
+            mode_parts.append("skip-slides")
+        if resume_before_id is not None:
+            mode_parts.append(f"resume_after_id={resume_before_id}")
+
+        self.stdout.write(
+            f"Processing {to_process} video(s) ({', '.join(mode_parts)}). "
+            f"total_candidates={total_candidates}, "
+            f"prefilter_skipped_slides={prefilter_skipped_slides}."
+        )
+
+        if to_process == 0:
+            self.stdout.write(self.style.WARNING("No videos to process."))
+            return
 
         updated = 0
         skipped = 0
         missing = 0
+        broken = 0
+        last_processed_id = None
+        last_processed_vid = None
 
         for video in queryset.iterator():
+            last_processed_id = video.id
+            last_processed_vid = video.vid
+
             info_path = os.path.join(settings.MEDIA_ROOT, video.path, "info.json")
             if not os.path.isfile(info_path):
                 missing += 1
                 continue
 
-            with open(info_path, encoding="utf-8") as f:
-                api_data = json.load(f)
+            try:
+                with open(info_path, encoding="utf-8") as f:
+                    api_data = json.load(f)
+            except json.JSONDecodeError as e:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"Skip id={video.id} vid={video.vid}: invalid info.json at "
+                        f"{info_path}: {e}"
+                    )
+                )
+                broken += 1
+                continue
 
             formatted = format_video_data(api_data, author=video.author, video_path=video.path)
             new_type = formatted.get("content_type")
@@ -64,7 +134,8 @@ class Command(BaseCommand):
                 continue
 
             self.stdout.write(
-                f"{'[DRY RUN] ' if dry_run else ''}vid={video.vid} "
+                f"{'[DRY RUN] ' if dry_run else ''}"
+                f"id={video.id} vid={video.vid} "
                 f"type {video.content_type} -> {new_type}, "
                 f"media_urls {len(video.media_urls or [])} -> {len(new_urls)}"
             )
@@ -76,8 +147,20 @@ class Command(BaseCommand):
                 video.save(update_fields=["content_type", "media_urls", "cover_url", "updated_at"])
             updated += 1
 
+        if last_processed_id is not None:
+            self.stdout.write(
+                f"Last processed: id={last_processed_id} vid={last_processed_vid}"
+            )
+
+        resume_note = (
+            f", prefilter_resume_before_id={resume_before_id}"
+            if resume_before_id is not None
+            else ""
+        )
         self.stdout.write(
             self.style.SUCCESS(
-                f"Done. updated={updated}, skipped={skipped}, missing_info_json={missing}"
+                f"Done. updated={updated}, skipped={skipped}, "
+                f"missing_info_json={missing}, broken_info_json={broken}, "
+                f"prefilter_skipped_slides={prefilter_skipped_slides}{resume_note}"
             )
         )

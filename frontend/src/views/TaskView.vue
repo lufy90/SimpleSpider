@@ -129,30 +129,32 @@
           align="center"
         >
           <template #default="scope">
-            <el-dropdown v-if="isMobile" trigger="click" placement="bottom-end">
-              <el-button text class="mobile-actions-trigger">
-                <el-icon><MoreFilled /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item @click="copyTask(scope.row)">
-                    <el-icon><DocumentCopy /></el-icon>
-                    <span style="margin-left: 6px">Copy</span>
-                  </el-dropdown-item>
-                  <el-dropdown-item
-                    @click="resetTask(scope.row)"
-                    :disabled="resettingTaskId === scope.row.id"
-                  >
-                    <el-icon><RefreshRight /></el-icon>
-                    <span style="margin-left: 6px">{{ resettingTaskId === scope.row.id ? 'Resetting...' : 'Reset' }}</span>
-                  </el-dropdown-item>
-                  <el-dropdown-item @click="onTaskAction(scope.row, 'delete')">
-                    <el-icon><Delete /></el-icon>
-                    <span style="margin-left: 6px">Delete</span>
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <div v-if="isMobile" class="mobile-actions-cell" @click.stop>
+              <el-dropdown trigger="click" placement="bottom-end">
+                <el-button text class="mobile-actions-trigger" @click.stop>
+                  <el-icon><MoreFilled /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="copyTask(scope.row)">
+                      <el-icon><DocumentCopy /></el-icon>
+                      <span style="margin-left: 6px">Copy</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      @click="resetTask(scope.row)"
+                      :disabled="resettingTaskId === scope.row.id"
+                    >
+                      <el-icon><RefreshRight /></el-icon>
+                      <span style="margin-left: 6px">{{ resettingTaskId === scope.row.id ? 'Resetting...' : 'Reset' }}</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item @click="onTaskAction(scope.row, 'delete')">
+                      <el-icon><Delete /></el-icon>
+                      <span style="margin-left: 6px">Delete</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
             <template v-else>
               <el-button
                 type="primary"
@@ -760,7 +762,8 @@ const handleSelectionChange = (selection) => {
   batchSelections.value = selection.map((x) => x.id)
 }
 
-const handleRowClick = (row) => {
+const handleRowClick = (row, column) => {
+  if (column?.label === 'A' || column?.label === 'Actions') return
   // Get the original task data from API
   ajax.get(`/dy/task/${row.id}/`)
     .then((res) => {
