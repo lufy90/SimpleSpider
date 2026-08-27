@@ -240,7 +240,9 @@ python manage.py auto_rate -p
 成功后视频的 `rate` 会更新，并标记 `is_auto_rated=True`。
 ## 已知问题
 
-项目使用 Python multithreading 进行并发爬取。受限于 Python GIL 及 Playwright 的多线程限制，实际无法同时打开多个 Headless 浏览器并发爬取；虽然可配置多个 Crawler worker，但同时只会有 1 个 Crawler Worker 使用浏览器。后续可能改用 Python multiprocessing 作为 Crawler worker。
+作者爬取任务已使用 **multiprocessing**（`spawn`）运行多个 Crawl worker，每个 worker 进程独占一个 Playwright 浏览器，可真正并行（通过任务参数 `num_crawl_workers` 配置）。Save worker 仍为线程，负责写入数据库。每个浏览器进程会占用较多内存，请按机器资源设置 worker 数量。后续若需进一步降低内存占用，可考虑改为 Playwright async API（单进程多 Context）。
+
+任务调度层（`start_crawler` / `task_manager`）仍使用 Python 线程管理队列，与 Celery 无关。
 
 ### 为什么不使用 Celery 和 Redis
 
