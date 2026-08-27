@@ -1,6 +1,7 @@
 """
 Management command to start the custom task queue worker process.
-This process manages a task queue and forks threads to handle tasks.
+This process reads tasks from the database; crawl tasks use multiprocessing
+for parallel Playwright browsers and threads for save workers.
 """
 
 from django.core.management.base import BaseCommand

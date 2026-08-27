@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import multiprocessing
 import requests
 import time
 from typing import List, Dict, Any, Optional
@@ -10,7 +11,7 @@ from .models import DyVideo, Status, DyAuthor, ContentType
 from playwright.sync_api import Response
 import queue
 from concurrent.futures import ThreadPoolExecutor
-from threading import Thread, Lock
+from threading import Thread
 from django.contrib.auth.models import User
 from .models import Task
 from django.db import close_old_connections
@@ -480,8 +481,8 @@ def crawl_page(page, url, exp_resp_urls, **kwargs) -> List[Dict[str, Any]]:
 def crawl_authors(aids, **kwargs) -> List[Dict[str, Any]]:
     """
     Crawl authors in a batch.
-    Note: This function runs in a worker thread, so we need to use bulk updates
-    instead of saving individual author objects to avoid database connection issues.
+    Note: This function runs in a crawl worker process; Django ORM calls use a thread pool
+    to stay isolated from Playwright.
     """
     driver = kwargs.get("driver", "firefox")
     exp_resp_urls = [
@@ -900,6 +901,60 @@ def _save_worker_sentinel():
     """Sentinel object to signal save_worker to exit. Use a unique object so None is a valid payload."""
     pass
 
+
+def _queue_task_done(q) -> None:
+    if hasattr(q, "task_done"):
+        q.task_done()
+
+
+def _queue_qsize(q) -> int:
+    try:
+        return q.qsize()
+    except (NotImplementedError, OSError):
+        return -1
+
+
+def _ensure_django_ready() -> None:
+    import django
+
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
+    if not django.apps.apps.ready:
+        django.setup()
+
+
+def _crawl_process_entry(worker_id, work_q, resp_q, crawl_kwargs) -> None:
+    _ensure_django_ready()
+    close_old_connections()
+    crawl_worker_loop(worker_id, work_q, resp_q, crawl_kwargs)
+
+
+def crawl_worker_loop(worker_id, work_q, resp_q, crawl_kwargs) -> None:
+    logger.info("crawl_worker %s start pid=%s", worker_id, os.getpid())
+    crawl_kwargs = {**crawl_kwargs, "q": resp_q}
+    try:
+        while True:
+            close_old_connections()
+            batch = work_q.get()
+            if batch is None:
+                logger.info("crawl_worker %s received shutdown sentinel", worker_id)
+                break
+            try:
+                logger.info(
+                    "crawl_worker %s processing batch with %s authors",
+                    worker_id,
+                    len(batch),
+                )
+                crawl_authors(batch, **crawl_kwargs)
+                logger.info("crawl_worker %s finished batch", worker_id)
+            except Exception as e:
+                logger.exception(
+                    "crawl_worker %s error for batch %s: %s", worker_id, batch, e
+                )
+    finally:
+        close_old_connections()
+        logger.info("crawl_worker %s exit pid=%s", worker_id, os.getpid())
+
+
 def save_worker(worker_id, q, sentinel=None):
     """
     Consume items from q and call save_data. Exits when sentinel is received.
@@ -912,46 +967,20 @@ def save_worker(worker_id, q, sentinel=None):
     while True:
         item = q.get()
         if item is sentinel:
-            q.task_done()
+            _queue_task_done(q)
             break
         try:
-            logger.info("save_worker %s processing item, queue size: %s", worker_id, q.qsize())
-            # timeout needed here
+            qsize = _queue_qsize(q)
+            if qsize >= 0:
+                logger.info("save_worker %s processing item, queue size: %s", worker_id, qsize)
+            else:
+                logger.info("save_worker %s processing item", worker_id)
             save_data(item)
         except Exception as e:
             logger.exception("save_worker %s save_data error: %s", worker_id, e)
-        q.task_done()
+        _queue_task_done(q)
     logger.info("save_worker %s exit", worker_id)
 
-def crawl_worker(worker_id, batches, batch_lock, **kwargs):
-    close_old_connections()
-    logger.info("crawl_worker %s start", worker_id)
-    try:
-        while True:
-            close_old_connections()
-            try:
-                with batch_lock:
-                    batch = batches.pop()
-            except IndexError:
-                logger.info("crawl_worker %s reach the end of batches, finished.", worker_id)
-                break
-            except Exception as e:
-                logger.exception("crawl_worker %s failed to take batch: %s", worker_id, e)
-                continue
-            try:
-                logger.info(
-                    "crawl_worker %s processing batch with %s authors, left batches: %s",
-                    worker_id,
-                    len(batch),
-                    len(batches),
-                )
-                crawl_authors(batch, **kwargs)
-                logger.info("crawl_worker %s finished batch, left batches: %s", worker_id, len(batches))
-            except Exception as e:
-                logger.exception("crawl_worker %s error for batch %s: %s", worker_id, batch, e)
-    finally:
-        close_old_connections()
-        logger.info("crawl_worker %s exit", worker_id)
 
 def download_media(url, path, name, **kwargs):
     """
@@ -1024,54 +1053,59 @@ def download_media(url, path, name, **kwargs):
         return {"status": "error", "message": str(e), "path": full_path}
 
 def crawl_authors_batch(aids, **kwargs):
-    # Fetch all author objects in the main thread
-    # authors = list(DyAuthor.objects.filter(id__in=author_ids))
-    
-    # response queue
-    resp_q = queue.Queue()
     batch_size = kwargs.get("batch_size", 30)
     task_id = kwargs.get("task_id")
-    logger.info(f"task (id {task_id}) started.")
-    # Create batches of author objects (not IDs)
-    batches = [aids[i:i+batch_size] for i in range(0, len(aids), batch_size)]
-    logger.info("crawl_authors_batch batches: %s batches with %s total aids", len(batches), len(aids))
+    logger.info("task (id %s) started.", task_id)
+    batches = [aids[i : i + batch_size] for i in range(0, len(aids), batch_size)]
+    logger.info(
+        "crawl_authors_batch batches: %s batches with %s total aids",
+        len(batches),
+        len(aids),
+    )
     default_num_crawl_workers = len(batches) if len(batches) < 2 else 2
     num_crawl_workers = kwargs.get("num_crawl_workers")
     if not num_crawl_workers:
         num_crawl_workers = default_num_crawl_workers
     num_save_workers = kwargs.get("num_save_workers", 3)
 
-    # num_crawl_workers = 1
-    # num_save_workers = 1
+    crawl_kwargs = {k: v for k, v in kwargs.items() if k != "q"}
+    ctx = multiprocessing.get_context("spawn")
+    work_q = ctx.Queue()
+    resp_q = ctx.Queue()
 
-    batch_lock = Lock()
-    crawl_workers = [
-        Thread(
-            target=crawl_worker,
-            args=(i, batches, batch_lock),
-            kwargs={"q": resp_q, **kwargs},
+    for batch in batches:
+        work_q.put(batch)
+    for _ in range(num_crawl_workers):
+        work_q.put(None)
+
+    crawl_processes = [
+        ctx.Process(
+            target=_crawl_process_entry,
+            args=(i, work_q, resp_q, crawl_kwargs),
             name=f"crawl-worker-{i}",
         )
         for i in range(num_crawl_workers)
     ]
-    logger.info("crawl_workers start: %s", num_crawl_workers)
-    for t in crawl_workers:
-        t.start()
+    logger.info("crawl_workers start: %s (multiprocessing spawn)", num_crawl_workers)
+    for proc in crawl_processes:
+        proc.start()
 
     sentinel = object()
-    save_workers = [Thread(target=save_worker, args=(i, resp_q, sentinel)) for i in range(num_save_workers)]
+    save_workers = [
+        Thread(target=save_worker, args=(i, resp_q, sentinel)) for i in range(num_save_workers)
+    ]
     logger.info("save_workers start: %s", num_save_workers)
     for t in save_workers:
         t.start()
 
-    for t in crawl_workers:
-        t.join()
+    for proc in crawl_processes:
+        proc.join()
 
     for _ in range(num_save_workers):
         resp_q.put(sentinel)
     for t in save_workers:
         t.join()
-    logger.info(f"task (id {task_id}) finished.")
+    logger.info("task (id %s) finished.", task_id)
 
 def download_videos(video_ids, max_workers=3, **kwargs):
     """
