@@ -401,82 +401,144 @@ def set_cookies(url: str = "https://www.douyin.com", fname: str = None, driver: 
         logger.error(f"Error setting cookies: {e}")
         return False
 
+PROFILE_URL_PREFIX = "https://www.douyin.com/aweme/v1/web/user/profile/"
+POST_URL_MARKER = "/aweme/post"
+
+
+def _is_profile_response(res_url: str, exp_urls: List[str]) -> bool:
+    if PROFILE_URL_PREFIX in res_url or "user/profile" in res_url:
+        return True
+    return any("profile" in exp and exp in res_url for exp in exp_urls)
+
+
+def _is_post_response(res_url: str, exp_urls: List[str]) -> bool:
+    if POST_URL_MARKER in res_url:
+        return True
+    return any("aweme/post" in exp and exp in res_url for exp in exp_urls)
+
+
+def _match_exp_url(res_url: str, exp_urls: List[str]) -> Optional[str]:
+    for exp in exp_urls:
+        if exp in res_url:
+            return exp
+    if POST_URL_MARKER in res_url:
+        return "https://www.douyin.com/aweme/v1/web/aweme/post"
+    if _is_profile_response(res_url, exp_urls):
+        for exp in exp_urls:
+            if "profile" in exp:
+                return exp
+    return None
+
+
+def _enqueue_crawl_response(q, matched_url: str, res_json, kwargs) -> None:
+    payload = {
+        "url": matched_url,
+        "json": res_json,
+    }
+    if "author_id" in kwargs:
+        payload["author_id"] = kwargs["author_id"]
+    if "user" in kwargs:
+        payload["user"] = kwargs["user"]
+
+    if "aweme/post" in matched_url or POST_URL_MARKER in matched_url:
+        kind = "post"
+    elif "profile" in matched_url:
+        kind = "profile"
+    else:
+        kind = "other"
+
+    try:
+        q.put(payload)
+        try:
+            qsize = q.qsize()
+        except (NotImplementedError, OSError):
+            qsize = -1
+        if qsize >= 0:
+            logger.info("enqueued %s response, queue size: %s", kind, qsize)
+        else:
+            logger.info("enqueued %s response", kind)
+    except Exception as e:
+        logger.exception(
+            "failed to enqueue %s response (url=%s, payload_keys=%s): %s",
+            kind,
+            matched_url,
+            list(payload.keys()),
+            e,
+        )
+
+
 def response_handler(res: Response, exp_urls: List[str], **kwargs) -> Dict[str, Any]:
     q = kwargs.get("q", None)
     if not q:
         raise ValueError("request queue is required")
-    for url in exp_urls:
-        if url in res.url:
-            try:
-                res_json = res.json()
-            except Exception as e:
-                logger.error("response_handler: res.json() failed for %s: %s", res.url, e)
-                logger.warning("response_handler: res.text: %s", res.text())
-                logger.warning("response_handler: res.status: %s", res.status)
-                logger.warning("response_handler: res.headers: %s", res.headers)
-                logger.warning("response_handler: res.request.headers: %s", res.request.headers)
-                logger.warning("response_handler: res.request.method: %s", res.request.method)
-                logger.warning("response_handler: res.request.url: %s", res.request.url)
-                # logger.warning("response_handler: res.request.body: %s", res.request.body)
-                # logger.warning("response_handler: res.request.body_bytes: %s", res.request.body_bytes)
-                # logger.warning("response_handler: res.request.body_bytes_io: %s", res.request.body_bytes_io)
-                # logger.warning("response_handler: res.request.body_io: %s", res.request.body_io)
-                #breakpoint()
-                return None
-            logger.debug("expected url: %s", url)
-            q.put({"url": url, "json": res_json, **kwargs})
-            logger.info("response_handler: enqueued item, queue size: %s", q.qsize())
-            logger.debug("response_handler kwargs: %s", {k: v for k, v in kwargs.items() if k != "q"})
+    matched = _match_exp_url(res.url, exp_urls)
+    if not matched:
+        return None
+    try:
+        res_json = res.json()
+    except Exception as e:
+        logger.error("response_handler: res.json() failed for %s: %s", res.url, e)
+        logger.warning("response_handler: res.text: %s", res.text())
+        logger.warning("response_handler: res.status: %s", res.status)
+        logger.warning("response_handler: res.headers: %s", res.headers)
+        logger.warning("response_handler: res.request.headers: %s", res.request.headers)
+        logger.warning("response_handler: res.request.method: %s", res.request.method)
+        logger.warning("response_handler: res.request.url: %s", res.request.url)
+        return None
+    logger.debug("expected url: %s", matched)
+    _enqueue_crawl_response(q, matched, res_json, kwargs)
     return None
 
 def crawl_page(page, url, exp_resp_urls, **kwargs) -> List[Dict[str, Any]]:
-    res_count = 0
+    profile_seen = 0
+    post_res_count = 0
+
     def wrapped_handler(res: Response):
-#        has_more = res.json().get('has_more', False)
-        nonlocal res_count
-        for url in exp_resp_urls:
-           if url in res.url:
-               res_count = res_count + 1
-               break
+        nonlocal profile_seen, post_res_count
+        if _is_post_response(res.url, exp_resp_urls):
+            post_res_count += 1
+        elif _is_profile_response(res.url, exp_resp_urls):
+            profile_seen += 1
         response_handler(res, exp_resp_urls, **kwargs)
-    page.on('response', wrapped_handler)
+
+    page.on("response", wrapped_handler)
     logger.info("crawl_page goto: %s", url)
     page.goto(url, timeout=60000, wait_until="load")
 
     page_count = kwargs.get("page_count", 0)
-    logger.info(f"crawl_page get page_count: {page_count}")
+    logger.info("crawl_page get page_count: %s", page_count)
     if page_count:
         page.get_by_text("抖音号").click()
-        while res_count < page_count:
-            logger.info(f"crawl_page current res_count: {res_count}")
+        while post_res_count < page_count:
+            logger.info("crawl_page current post_res_count: %s", post_res_count)
             page.keyboard.press("End")
-            page.wait_for_load_state('domcontentloaded', timeout=60000)
+            page.wait_for_load_state("domcontentloaded", timeout=60000)
             page.wait_for_timeout(10000)
 
-
-#        for i in range(page_count):
-#            page.keyboard.press("End")
-#            page.wait_for_load_state('domcontentloaded', timeout=60000)
-#            page.wait_for_timeout(5000)
-#            logger.info(f'page {i} loaded')
-    
     elif kwargs.get("multipage", False):
-        # turn to new page and crawl data
         page.get_by_text("抖音号").click()
         locator = page.locator("text='暂时没有更多了'")
         is_end = locator.is_visible()
         while not is_end:
             page.keyboard.press("End")
-            page.wait_for_load_state('domcontentloaded', timeout=60000)
+            page.wait_for_load_state("domcontentloaded", timeout=60000)
             locator = page.locator("text='暂时没有更多了'")
             is_end = locator.is_visible()
     else:
-        page.wait_for_load_state('domcontentloaded', timeout=60000)
+        page.wait_for_load_state("domcontentloaded", timeout=60000)
         page.wait_for_timeout(10000)
+        if post_res_count == 0:
+            page.keyboard.press("End")
+            page.wait_for_load_state("domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
 
-    # Allow late response events to be captured before returning
     page.wait_for_timeout(5000)
-
+    logger.info(
+        "crawl_page done: profile_seen=%s post_res_count=%s",
+        profile_seen,
+        post_res_count,
+    )
+    page.remove_listener("response", wrapped_handler)
 
 def crawl_authors(aids, **kwargs) -> List[Dict[str, Any]]:
     """
@@ -518,6 +580,8 @@ def crawl_authors(aids, **kwargs) -> List[Dict[str, Any]]:
             close_old_connections()
             logger.info(f'crawl_authors aid: {aid}')
             try:
+                recreate_page()
+
                 def run_db_operation(func):
                     future = db_executor.submit(func)
                     return future.result(timeout=db_timeout)
@@ -641,7 +705,6 @@ def crawl_by_url(url, **kwargs):
     # response queue
     resp_q = queue.Queue()
     num_save_workers = kwargs.get("num_save_workers", 3)
-    sentinel = object()
 
     with sync_playwright() as p:
         headless = kwargs.get("headless", True)
@@ -657,7 +720,7 @@ def crawl_by_url(url, **kwargs):
             logger.warning("add cookies failed")
         page = context.new_page()
 
-        save_workers = [Thread(target=save_worker, args=(i, resp_q, sentinel)) for i in range(num_save_workers)]
+        save_workers = [Thread(target=save_worker, args=(i, resp_q)) for i in range(num_save_workers)]
         logger.info("save_workers start: %s", num_save_workers)
         for t in save_workers:
             t.start()
@@ -667,15 +730,18 @@ def crawl_by_url(url, **kwargs):
         crawl_page(page, url, exp_resp_urls, q=resp_q, **kwargs)
 
         for _ in range(num_save_workers):
-            resp_q.put(sentinel)
+            resp_q.put(SAVE_WORKER_STOP)
         for t in save_workers:
             t.join()
 
         browser.close()
     logger.info(f"task (id {task_id}) finished.")
 
-def save_data(item:dict={}):
+def save_data(item: dict):
     close_old_connections()
+    if not isinstance(item, dict):
+        logger.warning("save_data skipped non-dict item type=%s", type(item).__name__)
+        return
     author_id = item.get("author_id", None)
 
     # Query author by author_id if it exists
@@ -897,9 +963,11 @@ def save_data(item:dict={}):
     else:
         logger.info(f"Unknown URL: {url}")
 
-def _save_worker_sentinel():
-    """Sentinel object to signal save_worker to exit. Use a unique object so None is a valid payload."""
-    pass
+class _SaveWorkerStop:
+    """Pickle-safe sentinel for save_worker shutdown (works with multiprocessing.Queue)."""
+
+
+SAVE_WORKER_STOP = _SaveWorkerStop()
 
 
 def _queue_task_done(q) -> None:
@@ -912,20 +980,6 @@ def _queue_qsize(q) -> int:
         return q.qsize()
     except (NotImplementedError, OSError):
         return -1
-
-
-def _ensure_django_ready() -> None:
-    import django
-
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
-    if not django.apps.apps.ready:
-        django.setup()
-
-
-def _crawl_process_entry(worker_id, work_q, resp_q, crawl_kwargs) -> None:
-    _ensure_django_ready()
-    close_old_connections()
-    crawl_worker_loop(worker_id, work_q, resp_q, crawl_kwargs)
 
 
 def crawl_worker_loop(worker_id, work_q, resp_q, crawl_kwargs) -> None:
@@ -961,12 +1015,11 @@ def save_worker(worker_id, q, sentinel=None):
     Uses sentinel-based shutdown so workers do not exit early while crawl_workers
     are still starting or loading pages (avoiding timeout=600 queue.Empty race).
     """
-    if sentinel is None:
-        sentinel = _save_worker_sentinel
+    stop = sentinel if sentinel is not None else SAVE_WORKER_STOP
     logger.info("save_worker start: %s", worker_id)
     while True:
         item = q.get()
-        if item is sentinel:
+        if item is stop or isinstance(item, _SaveWorkerStop):
             _queue_task_done(q)
             break
         try:
@@ -1069,6 +1122,8 @@ def crawl_authors_batch(aids, **kwargs):
     num_save_workers = kwargs.get("num_save_workers", 3)
 
     crawl_kwargs = {k: v for k, v in kwargs.items() if k != "q"}
+    from dyvideo.crawl_worker_entry import crawl_process_entry
+
     ctx = multiprocessing.get_context("spawn")
     work_q = ctx.Queue()
     resp_q = ctx.Queue()
@@ -1080,29 +1135,29 @@ def crawl_authors_batch(aids, **kwargs):
 
     crawl_processes = [
         ctx.Process(
-            target=_crawl_process_entry,
+            target=crawl_process_entry,
             args=(i, work_q, resp_q, crawl_kwargs),
             name=f"crawl-worker-{i}",
         )
         for i in range(num_crawl_workers)
     ]
-    logger.info("crawl_workers start: %s (multiprocessing spawn)", num_crawl_workers)
-    for proc in crawl_processes:
-        proc.start()
 
-    sentinel = object()
     save_workers = [
-        Thread(target=save_worker, args=(i, resp_q, sentinel)) for i in range(num_save_workers)
+        Thread(target=save_worker, args=(i, resp_q)) for i in range(num_save_workers)
     ]
     logger.info("save_workers start: %s", num_save_workers)
     for t in save_workers:
         t.start()
 
+    logger.info("crawl_workers start: %s (multiprocessing spawn)", num_crawl_workers)
+    for proc in crawl_processes:
+        proc.start()
+
     for proc in crawl_processes:
         proc.join()
 
     for _ in range(num_save_workers):
-        resp_q.put(sentinel)
+        resp_q.put(SAVE_WORKER_STOP)
     for t in save_workers:
         t.join()
     logger.info("task (id %s) finished.", task_id)
