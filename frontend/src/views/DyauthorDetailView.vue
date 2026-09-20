@@ -265,7 +265,10 @@ const getVideoData = async (append = false) => {
     
     if (Array.isArray(data)) {
       data.forEach((x) => {
-        x.createdAt = new Date(x.created_at).toLocaleString('zh-CN', timeOption)
+        const displayTime = x.create_time || x.created_at
+        x.createdAt = displayTime
+          ? new Date(displayTime).toLocaleString('zh-CN', timeOption)
+          : '-'
         x.updatedAt = new Date(x.updated_at).toLocaleString('zh-CN', timeOption)
         x.name = x.desc || x.name
       })
