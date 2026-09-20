@@ -238,8 +238,7 @@ fun AuthorsScreen(
                                     state.error = null
                                     try {
                                         val updated = ApiClient.api.patchAuthor(author.id, RatePatchBody(newRate))
-                                        val i = state.items.indexOfFirst { it.id == author.id }
-                                        if (i >= 0) state.items[i] = updated
+                                        state.replaceAuthor(updated)
                                     } catch (e: Exception) {
                                         state.error = e.message
                                     } finally {
