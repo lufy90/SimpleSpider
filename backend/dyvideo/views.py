@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
@@ -17,7 +18,7 @@ from .serializers import (
     CrawlByUrlSerializer,
     CrawlAllSerializer,
 )
-from .pagination import DyCursorPagination
+from .pagination import DyAuthorVideoCursorPagination, DyCursorPagination
 from .task_manager import task_manager
 
 
@@ -135,6 +136,17 @@ class DyVideoView(ModelViewSet):
     def _is_random_request(self):
         value = (self.request.query_params.get('random') or '').strip().lower()
         return value in {'true', '1', 'yes', 'on'}
+
+    def _uses_author_publish_ordering(self) -> bool:
+        qp = self.request.query_params
+        author = (qp.get('author') or '').strip()
+        ordering = (qp.get('ordering') or '').strip()
+        return bool(author) and not self._is_random_request() and not ordering
+
+    def _apply_author_publish_ordering(self, queryset):
+        return queryset.annotate(
+            sort_published_at=Coalesce('create_time', 'created_at')
+        ).order_by('-sort_published_at', '-id')
     
     def get_queryset(self):
         return DyVideo.objects.all()
@@ -162,6 +174,8 @@ class DyVideoView(ModelViewSet):
 
         if random_mode:
             queryset = queryset.order_by('?')
+        elif self._uses_author_publish_ordering():
+            queryset = self._apply_author_publish_ordering(queryset)
         return queryset
     
     @action(detail=False, methods=['post'], url_path='download')
@@ -258,6 +272,15 @@ class DyVideoCursorView(DyVideoView):
     """Cursor-paginated videos: list/detail use read serializer; writes use full serializer."""
 
     pagination_class = DyCursorPagination
+
+    @property
+    def paginator(self):
+        if not hasattr(self, '_paginator'):
+            if self._uses_author_publish_ordering():
+                self._paginator = DyAuthorVideoCursorPagination()
+            else:
+                self._paginator = DyCursorPagination()
+        return self._paginator
 
 
 class TaskView(ModelViewSet):

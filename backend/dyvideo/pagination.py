@@ -13,6 +13,15 @@ class DyCursorPagination(CursorPagination):
     ordering = "-created_at", "-id"
 
 
+class DyAuthorVideoCursorPagination(DyCursorPagination):
+    """
+    Cursor pagination for author-scoped video lists ordered by publish time.
+    Requires queryset annotated with sort_published_at (Coalesce create_time, created_at).
+    """
+
+    ordering = "-sort_published_at", "-id"
+
+
 class CustomPageNumberPagination(PageNumberPagination):
     """
     Custom pagination class that supports dynamic page size via 'limit' parameter

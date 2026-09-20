@@ -48,6 +48,7 @@ fun AuthorDetailScreen(
     videoFeedHolder: AuthorDetailVideoFeedHolder,
     onBack: () -> Unit,
     onVideoClick: (DyVideoDto, List<DyVideoDto>, Int, PlayerPlaylistHolder.PlaylistPagination?) -> Unit,
+    onAuthorUpdated: (DyAuthorDto) -> Unit = {},
 ) {
     val videoFeed = remember(authorId) {
         videoFeedHolder.restoreOrNull(authorId) ?: VideosFeedHoist()
@@ -123,7 +124,10 @@ fun AuthorDetailScreen(
                                     authorRateBusy = true
                                     error = null
                                     try {
-                                        author = ApiClient.api.patchAuthor(authorId, RatePatchBody(newRate))
+                                        val updated =
+                                            ApiClient.api.patchAuthor(authorId, RatePatchBody(newRate))
+                                        author = updated
+                                        onAuthorUpdated(updated)
                                     } catch (e: Exception) {
                                         error = e.message
                                     } finally {

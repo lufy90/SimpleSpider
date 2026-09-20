@@ -28,6 +28,13 @@ class AuthorsListHoistedState(
     var error by mutableStateOf<String?>(null)
     var rateSavingId by mutableStateOf<Int?>(null)
     var showSearchBar by mutableStateOf(false)
+
+    fun replaceAuthor(updated: DyAuthorDto) {
+        val i = items.indexOfFirst { it.id == updated.id }
+        if (i >= 0) {
+            items[i] = updated
+        }
+    }
 }
 
 @Composable

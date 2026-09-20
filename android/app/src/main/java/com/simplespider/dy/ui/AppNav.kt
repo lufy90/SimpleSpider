@@ -291,6 +291,7 @@ private fun AuthorsTabWithNestedNav(
                 tokenStore = tokenStore,
                 videoFeedHolder = authorDetailVideoFeedHolder,
                 onBack = { authorsNavController.popBackStack() },
+                onAuthorUpdated = { hoisted.replaceAuthor(it) },
                 onVideoClick = { _, playlist, index, pagination ->
                     PlayerPlaylistHolder.setFromVideos(
                         playlist,
