@@ -32,7 +32,11 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,16 +46,21 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.simplespider.dy.data.ApiClient
+import com.simplespider.dy.data.AuthorListQueryParams
 import com.simplespider.dy.data.DyAuthorDto
 import com.simplespider.dy.data.RatePatchBody
+import com.simplespider.dy.data.TokenStore
 import com.simplespider.dy.data.cursorFromPaginationLink
 import com.simplespider.dy.data.hasMoreFromPaginationLink
+import com.simplespider.dy.ui.components.ListFilterButton
+import com.simplespider.dy.ui.components.ListFilterDialog
+import com.simplespider.dy.ui.components.RateChoiceColumn
 import com.simplespider.dy.ui.components.RateStarsRow
+import com.simplespider.dy.ui.components.StatusChoiceColumn
+import com.simplespider.dy.ui.components.TriStateColumn
 import com.simplespider.dy.ui.gestures.rememberSearchBarSwipeNestedConnection
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -59,6 +68,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun AuthorsScreen(
     modifier: Modifier = Modifier,
+    tokenStore: TokenStore,
     hoistedState: AuthorsListHoistedState? = null,
     onAuthorClick: (Int) -> Unit,
 ) {
@@ -66,6 +76,14 @@ fun AuthorsScreen(
     val state = hoistedState ?: internalState
     val listState = state.listState
     val scope = rememberCoroutineScope()
+    var filterOpen by remember { mutableStateOf(false) }
+    var filterActive by remember { mutableStateOf(false) }
+    var draftRate by remember { mutableStateOf<Int?>(null) }
+    var draftStatus by remember { mutableStateOf<String?>(null) }
+    var draftFavor by remember { mutableStateOf<Boolean?>(null) }
+    var draftValid by remember { mutableStateOf<Boolean?>(null) }
+
+    suspend fun authorQuery(): AuthorListQueryParams = tokenStore.readAuthorListQueryParams()
 
     val searchSwipeConnection = rememberSearchBarSwipeNestedConnection(
         enabled = { true },
@@ -91,11 +109,18 @@ fun AuthorsScreen(
             state.hasPrevious = false
             state.items.clear()
             try {
+                val q = authorQuery()
+                filterActive = q.hasActiveFilter()
                 val res = ApiClient.api.listAuthors(
                     limit = 20,
                     cursor = null,
                     search = state.search.ifBlank { null },
+                    rate = q.rate,
+                    status = q.status,
+                    isFavor = q.isFavor,
+                    isValid = q.isValid,
                 )
+                state.appliedQuery = q
                 applyPaginationLinks(res.next, res.previous)
                 res.results?.let { state.items.addAll(it) }
             } catch (e: Exception) {
@@ -112,10 +137,15 @@ fun AuthorsScreen(
             val cursor = state.nextCursor ?: return@launch
             state.loadingMore = true
             try {
+                val q = authorQuery()
                 val res = ApiClient.api.listAuthors(
                     limit = 20,
                     cursor = cursor,
                     search = state.search.ifBlank { null },
+                    rate = q.rate,
+                    status = q.status,
+                    isFavor = q.isFavor,
+                    isValid = q.isValid,
                 )
                 val newItems = res.results.orEmpty().filter { n -> state.items.none { it.id == n.id } }
                 if (newItems.isNotEmpty()) {
@@ -139,10 +169,15 @@ fun AuthorsScreen(
             val cursor = state.previousCursor ?: return@launch
             state.loadingPrevious = true
             try {
+                val q = authorQuery()
                 val res = ApiClient.api.listAuthors(
                     limit = 20,
                     cursor = cursor,
                     search = state.search.ifBlank { null },
+                    rate = q.rate,
+                    status = q.status,
+                    isFavor = q.isFavor,
+                    isValid = q.isValid,
                 )
                 val newItems = res.results.orEmpty().filter { n -> state.items.none { it.id == n.id } }
                 if (newItems.isNotEmpty()) {
@@ -164,9 +199,14 @@ fun AuthorsScreen(
         }
     }
 
-    LaunchedEffect(state) {
+    LaunchedEffect(state, tokenStore) {
+        val current = tokenStore.readAuthorListQueryParams()
+        filterActive = current.hasActiveFilter()
+        if (state.items.isEmpty() || state.appliedQuery != current) {
+            resetAndLoad()
+        }
         merge(
-            if (state.items.isEmpty()) flowOf(Unit).map { } else emptyFlow(),
+            tokenStore.authorListQueryParamsFlow.drop(1).map { },
             snapshotFlow { state.search }
                 .drop(1)
                 .debounce(1600L)
@@ -305,6 +345,59 @@ fun AuthorsScreen(
                         focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f),
                     ),
                 )
+            }
+        }
+        ListFilterButton(
+            active = filterActive,
+            onClick = {
+                scope.launch {
+                    val q = authorQuery()
+                    draftRate = q.rate
+                    draftStatus = q.status
+                    draftFavor = q.isFavor
+                    draftValid = q.isValid
+                    filterOpen = true
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+        )
+        if (filterOpen) {
+            ListFilterDialog(
+                title = "Filter authors",
+                onDismiss = { filterOpen = false },
+                onClear = {
+                    scope.launch {
+                        tokenStore.saveAuthorListQueryParams(AuthorListQueryParams())
+                        filterOpen = false
+                    }
+                },
+                onApply = {
+                    scope.launch {
+                        tokenStore.saveAuthorListQueryParams(
+                            AuthorListQueryParams(
+                                rate = draftRate,
+                                status = draftStatus,
+                                isFavor = draftFavor,
+                                isValid = draftValid,
+                            ),
+                        )
+                        filterOpen = false
+                    }
+                },
+            ) {
+                Text("Rate", style = MaterialTheme.typography.titleSmall)
+                RateChoiceColumn(current = draftRate, onSelect = { draftRate = it })
+                Spacer(Modifier.height(8.dp))
+                Text("Status", style = MaterialTheme.typography.titleSmall)
+                StatusChoiceColumn(current = draftStatus, onSelect = { draftStatus = it })
+                Spacer(Modifier.height(8.dp))
+                Text("Favor", style = MaterialTheme.typography.titleSmall)
+                TriStateColumn(current = draftFavor, onSelect = { draftFavor = it })
+                Spacer(Modifier.height(8.dp))
+                Text("Valid", style = MaterialTheme.typography.titleSmall)
+                TriStateColumn(current = draftValid, onSelect = { draftValid = it })
             }
         }
     }

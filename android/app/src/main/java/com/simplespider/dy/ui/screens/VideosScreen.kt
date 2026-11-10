@@ -30,14 +30,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
@@ -53,6 +61,12 @@ import com.simplespider.dy.data.VideoListQueryParams
 import com.simplespider.dy.data.cursorFromPaginationLink
 import com.simplespider.dy.data.hasMoreFromPaginationLink
 import com.simplespider.dy.ui.VideosFeedHoist
+import com.simplespider.dy.ui.components.ListFilterButton
+import com.simplespider.dy.ui.components.ListFilterDialog
+import com.simplespider.dy.ui.components.RateChoiceColumn
+import com.simplespider.dy.ui.components.RateRangeFields
+import com.simplespider.dy.ui.components.StatusChoiceColumn
+import com.simplespider.dy.ui.components.TriStateColumn
 import com.simplespider.dy.ui.gestures.rememberSearchBarSwipeNestedConnection
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
@@ -72,6 +86,14 @@ fun VideosScreen(
 ) {
     val feed = mainTabFeed ?: remember { VideosFeedHoist() }
     val scope = rememberCoroutineScope()
+    var filterOpen by remember { mutableStateOf(false) }
+    var filterActive by remember { mutableStateOf(false) }
+    var draftRate by remember { mutableStateOf<Int?>(null) }
+    var draftMin by remember { mutableStateOf("") }
+    var draftMax by remember { mutableStateOf("") }
+    var draftLike by remember { mutableStateOf<Boolean?>(null) }
+    var draftFavor by remember { mutableStateOf<Boolean?>(null) }
+    var draftStatus by remember { mutableStateOf<String?>(null) }
     val authorIdState = rememberUpdatedState(authorId)
     val searchSwipeConnection = rememberSearchBarSwipeNestedConnection(
         enabled = { authorIdState.value == null },
@@ -116,6 +138,7 @@ fun VideosScreen(
             feed.items.clear()
             try {
                 val q = videoListFiltersForRequest()
+                if (authorId == null) filterActive = q.hasActiveFilter()
                 val res = ApiClient.api.listVideos(
                     limit = 20,
                     cursor = null,
@@ -181,10 +204,10 @@ fun VideosScreen(
     }
 
     fun loadPreviousVideos() {
+        if (feed.loadingPrevious || feed.loading || !feed.hasPrevious) return
+        val cursor = feed.previousCursor ?: return
+        feed.loadingPrevious = true
         scope.launch {
-            if (feed.loadingPrevious || feed.loading || !feed.hasPrevious) return@launch
-            val cursor = feed.previousCursor ?: return@launch
-            feed.loadingPrevious = true
             try {
                 val q = videoListFiltersForRequest()
                 val res = ApiClient.api.listVideos(
@@ -203,9 +226,9 @@ fun VideosScreen(
                 val newItems = res.results.orEmpty().filter { n -> feed.items.none { it.id == n.id } }
                 if (newItems.isNotEmpty()) {
                     val added = newItems.size
-                    feed.items.addAll(0, newItems)
                     val first = feed.gridState.firstVisibleItemIndex
                     val offset = feed.gridState.firstVisibleItemScrollOffset
+                    feed.items.addAll(0, newItems)
                     feed.gridState.scrollToItem(first + added, offset)
                 }
                 applyPaginationLinks(res.next, res.previous)
@@ -232,6 +255,7 @@ fun VideosScreen(
             return@LaunchedEffect
         } else {
             val currentQ = tokenStore.readVideoListQueryParams()
+            filterActive = currentQ.hasActiveFilter()
             val queryMismatch = feed.querySnapshotForLoadedList != currentQ
             if (feed.items.isEmpty() || queryMismatch) {
                 resetAndLoad()
@@ -253,21 +277,42 @@ fun VideosScreen(
         snapshotFlow {
             val info = feed.gridState.layoutInfo
             val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val first = feed.gridState.firstVisibleItemIndex
-            Triple(first, last, feed.items.size)
-        }.collect { (firstVisible, lastVisible, size) ->
-            if (size == 0 || feed.loading) return@collect
-            if (firstVisible <= 2 && feed.hasPrevious && !feed.loadingPrevious) {
+            VideoGridScrollSample(
+                first = feed.gridState.firstVisibleItemIndex,
+                last = last,
+                size = feed.items.size,
+                columns = feed.gridColumns.coerceIn(2, 4),
+                loading = feed.loading,
+                loadingPrevious = feed.loadingPrevious,
+                hasPrevious = feed.hasPrevious,
+            )
+        }.collect { sample ->
+            if (sample.size == 0 || sample.loading) return@collect
+            val onFirstRow = sample.first < sample.columns
+            if (onFirstRow && sample.hasPrevious && !sample.loadingPrevious) {
                 loadPreviousVideos()
             }
-            if (lastVisible >= size - 4 && feed.hasMore && !feed.loadingMore) {
+            if (sample.last >= sample.size - 4 && feed.hasMore && !feed.loadingMore) {
                 loadMoreVideos()
             }
         }
     }
 
-    val listPullNestedModifier =
-        if (authorId == null) Modifier.nestedScroll(searchSwipeConnection) else Modifier
+    val pullPreviousConnection = rememberPullPreviousConnection(
+        atTop = { !feed.gridState.canScrollBackward },
+        canLoad = {
+            feed.items.isNotEmpty() &&
+                feed.hasPrevious &&
+                !feed.loadingPrevious &&
+                !feed.loading
+        },
+        onLoad = { loadPreviousVideos() },
+    )
+    val listPullNestedModifier = if (authorId == null) {
+        Modifier.nestedScroll(pullPreviousConnection).nestedScroll(searchSwipeConnection)
+    } else {
+        Modifier.nestedScroll(pullPreviousConnection)
+    }
 
     Box(modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         Column(Modifier.fillMaxSize()) {
@@ -294,18 +339,6 @@ fun VideosScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     val span = GridItemSpan(feed.gridColumns.coerceIn(2, 4))
-                    if (feed.loadingPrevious) {
-                        item(key = "loading_previous", span = { span }) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 12.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                CircularProgressIndicator(Modifier.size(28.dp))
-                            }
-                        }
-                    }
                     items(feed.items, key = { it.id }) { video ->
                         VideoGridItem(
                             video = video,
@@ -344,6 +377,14 @@ fun VideosScreen(
                     }
                 }
             }
+        }
+        if (feed.loadingPrevious && feed.items.isNotEmpty()) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp)
+                    .size(28.dp),
+            )
         }
         if (authorId == null) {
             AnimatedVisibility(
@@ -391,6 +432,137 @@ fun VideosScreen(
                 }
             }
         }
+        if (authorId == null) {
+            ListFilterButton(
+                active = filterActive,
+                onClick = {
+                    scope.launch {
+                        val q = tokenStore.readVideoListQueryParams()
+                        draftRate = q.rate
+                        draftMin = q.minRate?.toString().orEmpty()
+                        draftMax = q.maxRate?.toString().orEmpty()
+                        draftLike = q.isLike
+                        draftFavor = q.isFavor
+                        draftStatus = q.status
+                        filterOpen = true
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+            )
+            if (filterOpen) {
+                ListFilterDialog(
+                    title = "Filter videos",
+                    onDismiss = { filterOpen = false },
+                    onClear = {
+                        scope.launch {
+                            tokenStore.saveVideoListQueryParams(VideoListQueryParams())
+                            filterOpen = false
+                        }
+                    },
+                    onApply = {
+                        scope.launch {
+                            var lo = draftMin.toIntOrNull()?.coerceIn(0, 10)
+                            var hi = draftMax.toIntOrNull()?.coerceIn(0, 10)
+                            if (lo != null && hi != null && lo > hi) {
+                                val tmp = lo
+                                lo = hi
+                                hi = tmp
+                            }
+                            tokenStore.saveVideoListQueryParams(
+                                VideoListQueryParams(
+                                    rate = draftRate,
+                                    minRate = lo,
+                                    maxRate = hi,
+                                    isLike = draftLike,
+                                    isFavor = draftFavor,
+                                    status = draftStatus,
+                                ),
+                            )
+                            filterOpen = false
+                        }
+                    },
+                ) {
+                    Text("Exact rate", style = MaterialTheme.typography.titleSmall)
+                    RateChoiceColumn(current = draftRate, onSelect = { draftRate = it })
+                    Spacer(Modifier.height(8.dp))
+                    Text("Min / max rate", style = MaterialTheme.typography.titleSmall)
+                    RateRangeFields(
+                        minRate = draftMin,
+                        maxRate = draftMax,
+                        onMinChange = { draftMin = it },
+                        onMaxChange = { draftMax = it },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("Liked", style = MaterialTheme.typography.titleSmall)
+                    TriStateColumn(current = draftLike, onSelect = { draftLike = it })
+                    Spacer(Modifier.height(8.dp))
+                    Text("Favorited", style = MaterialTheme.typography.titleSmall)
+                    TriStateColumn(current = draftFavor, onSelect = { draftFavor = it })
+                    Spacer(Modifier.height(8.dp))
+                    Text("Status", style = MaterialTheme.typography.titleSmall)
+                    StatusChoiceColumn(current = draftStatus, onSelect = { draftStatus = it })
+                }
+            }
+        }
+    }
+}
+
+private data class VideoGridScrollSample(
+    val first: Int,
+    val last: Int,
+    val size: Int,
+    val columns: Int,
+    val loading: Boolean,
+    val loadingPrevious: Boolean,
+    val hasPrevious: Boolean,
+)
+
+private const val PullPreviousThresholdPx = 24f
+
+@Composable
+private fun rememberPullPreviousConnection(
+    atTop: () -> Boolean,
+    canLoad: () -> Boolean,
+    onLoad: () -> Unit,
+): NestedScrollConnection {
+    val latestAtTop = rememberUpdatedState(atTop)
+    val latestCanLoad = rememberUpdatedState(canLoad)
+    val latestOnLoad = rememberUpdatedState(onLoad)
+    return remember {
+        object : NestedScrollConnection {
+            private var pullDownPx = 0f
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (!source.isUserPull()) return Offset.Zero
+                val dy = consumed.y + available.y
+                val top = latestAtTop.value.invoke()
+                if (!top || dy <= 0f) {
+                    pullDownPx = 0f
+                    return Offset.Zero
+                }
+                pullDownPx += dy
+                if (pullDownPx >= PullPreviousThresholdPx && latestCanLoad.value.invoke()) {
+                    pullDownPx = 0f
+                    latestOnLoad.value.invoke()
+                }
+                return Offset.Zero
+            }
+        }
+    }
+}
+
+private fun NestedScrollSource.isUserPull(): Boolean = when (this) {
+    NestedScrollSource.UserInput -> true
+    NestedScrollSource.SideEffect -> false
+    else -> {
+        @Suppress("DEPRECATION")
+        this == NestedScrollSource.Drag
     }
 }
 

@@ -10,4 +10,8 @@ data class VideoListQueryParams(
     val isLike: Boolean? = null,
     val isFavor: Boolean? = null,
     val status: String? = null,
-)
+) {
+    fun hasActiveFilter(): Boolean =
+        rate != null || minRate != null || maxRate != null ||
+            isLike != null || isFavor != null || status != null
+}

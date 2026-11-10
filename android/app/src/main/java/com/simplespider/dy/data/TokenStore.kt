@@ -28,6 +28,10 @@ class TokenStore(private val context: Context) {
     private val keyVideoQueryIsLike = stringPreferencesKey("video_query_is_like")
     private val keyVideoQueryIsFavor = stringPreferencesKey("video_query_is_favor")
     private val keyVideoQueryStatus = stringPreferencesKey("video_query_status")
+    private val keyAuthorQueryRate = intPreferencesKey("author_query_rate")
+    private val keyAuthorQueryStatus = stringPreferencesKey("author_query_status")
+    private val keyAuthorQueryIsFavor = stringPreferencesKey("author_query_is_favor")
+    private val keyAuthorQueryIsValid = stringPreferencesKey("author_query_is_valid")
     private val keyRememberLogin = booleanPreferencesKey("remember_login")
     private val keySavedUsername = stringPreferencesKey("saved_username")
     private val keySavedPassword = stringPreferencesKey("saved_password")
@@ -63,8 +67,37 @@ class TokenStore(private val context: Context) {
             .map { prefs -> videoListQueryParamsFromPrefs(prefs) }
             .distinctUntilChanged()
 
+    val authorListQueryParamsFlow: Flow<AuthorListQueryParams> =
+        context.dataStore.data
+            .map { prefs -> authorListQueryParamsFromPrefs(prefs) }
+            .distinctUntilChanged()
+
     suspend fun readVideoListQueryParams(): VideoListQueryParams =
         videoListQueryParamsFromPrefs(context.dataStore.data.first())
+
+    suspend fun readAuthorListQueryParams(): AuthorListQueryParams =
+        authorListQueryParamsFromPrefs(context.dataStore.data.first())
+
+    suspend fun saveVideoListQueryParams(params: VideoListQueryParams) {
+        context.dataStore.edit { prefs ->
+            prefs.remove(keyVideoQueryRateLegacy)
+            writeRate(prefs, keyVideoQueryRate, params.rate)
+            writeRate(prefs, keyVideoQueryMinRate, params.minRate)
+            writeRate(prefs, keyVideoQueryMaxRate, params.maxRate)
+            writeTriBool(prefs, keyVideoQueryIsLike, params.isLike)
+            writeTriBool(prefs, keyVideoQueryIsFavor, params.isFavor)
+            writeStatus(prefs, keyVideoQueryStatus, params.status)
+        }
+    }
+
+    suspend fun saveAuthorListQueryParams(params: AuthorListQueryParams) {
+        context.dataStore.edit { prefs ->
+            writeRate(prefs, keyAuthorQueryRate, params.rate)
+            writeStatus(prefs, keyAuthorQueryStatus, params.status)
+            writeTriBool(prefs, keyAuthorQueryIsFavor, params.isFavor)
+            writeTriBool(prefs, keyAuthorQueryIsValid, params.isValid)
+        }
+    }
 
     suspend fun saveVideoQueryRate(rateExact: Int?) {
         context.dataStore.edit { prefs ->
@@ -202,6 +235,49 @@ class TokenStore(private val context: Context) {
             status = status,
         )
     }
+
+    private fun authorListQueryParamsFromPrefs(prefs: Preferences): AuthorListQueryParams {
+        val rateKey = prefs[keyAuthorQueryRate] ?: -1
+        val rate = if (rateKey < 0) null else rateKey.coerceIn(0, 5)
+        return AuthorListQueryParams(
+            rate = rate,
+            status = prefs[keyAuthorQueryStatus]?.trim()?.takeIf { it.isNotEmpty() },
+            isFavor = readTriBool(prefs, keyAuthorQueryIsFavor),
+            isValid = readTriBool(prefs, keyAuthorQueryIsValid),
+        )
+    }
+
+    private fun writeRate(prefs: androidx.datastore.preferences.core.MutablePreferences, key: Preferences.Key<Int>, value: Int?) {
+        prefs[key] = value?.coerceIn(0, 10) ?: -1
+    }
+
+    private fun writeStatus(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        key: Preferences.Key<String>,
+        status: String?,
+    ) {
+        val v = status?.trim().orEmpty()
+        if (v.isEmpty()) prefs.remove(key) else prefs[key] = v
+    }
+
+    private fun writeTriBool(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        key: Preferences.Key<String>,
+        value: Boolean?,
+    ) {
+        when (value) {
+            true -> prefs[key] = "true"
+            false -> prefs[key] = "false"
+            null -> prefs.remove(key)
+        }
+    }
+
+    private fun readTriBool(prefs: Preferences, key: Preferences.Key<String>): Boolean? =
+        when (prefs[key]) {
+            "true" -> true
+            "false" -> false
+            else -> null
+        }
 }
 
 enum class VideoEndAction(val storageValue: String) {

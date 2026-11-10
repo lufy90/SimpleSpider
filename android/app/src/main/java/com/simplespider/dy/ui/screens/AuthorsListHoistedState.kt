@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import com.simplespider.dy.data.AuthorListQueryParams
 import com.simplespider.dy.data.DyAuthorDto
 
 @Stable
@@ -28,6 +29,7 @@ class AuthorsListHoistedState(
     var error by mutableStateOf<String?>(null)
     var rateSavingId by mutableStateOf<Int?>(null)
     var showSearchBar by mutableStateOf(false)
+    var appliedQuery by mutableStateOf<AuthorListQueryParams?>(null)
 
     fun replaceAuthor(updated: DyAuthorDto) {
         val i = items.indexOfFirst { it.id == updated.id }

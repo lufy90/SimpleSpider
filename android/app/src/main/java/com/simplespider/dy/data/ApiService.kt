@@ -19,6 +19,7 @@ interface ApiService {
         @Query("rate") rate: Int? = null,
         @Query("status") status: String? = null,
         @Query("is_favor") isFavor: Boolean? = null,
+        @Query("is_valid") isValid: Boolean? = null,
     ): PagedAuthors
 
     @GET("dy/author/{id}/")
