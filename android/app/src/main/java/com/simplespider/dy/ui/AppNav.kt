@@ -273,6 +273,7 @@ private fun AuthorsTabWithNestedNav(
     ) {
         composable(ROUTE_AUTHORS_LIST) {
             AuthorsScreen(
+                tokenStore = tokenStore,
                 hoistedState = hoisted,
                 onAuthorClick = { id ->
                     authorsNavController.navigate("authors_detail/$id")
