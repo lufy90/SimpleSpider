@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.simplespider.dy.BuildConfig
 import com.simplespider.dy.data.ApiClient
 import com.simplespider.dy.data.AuthTokenHolder
 import com.simplespider.dy.data.TokenStore
@@ -217,5 +218,12 @@ fun SettingsScreen(
                     Text("Log out")
                 }
             }
+
+            Spacer(Modifier.height(28.dp))
+            Text(
+                "Version ${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodySmall,
+                color = DyTextSecondary,
+            )
         }
 }

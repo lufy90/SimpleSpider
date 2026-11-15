@@ -9,3 +9,4 @@ migrations
 *.pyc
 log
 dataset
+dataset*
