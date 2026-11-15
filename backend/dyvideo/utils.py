@@ -411,12 +411,6 @@ def _is_profile_response(res_url: str, exp_urls: List[str]) -> bool:
     return any("profile" in exp and exp in res_url for exp in exp_urls)
 
 
-def _is_post_response(res_url: str, exp_urls: List[str]) -> bool:
-    if POST_URL_MARKER in res_url:
-        return True
-    return any("aweme/post" in exp and exp in res_url for exp in exp_urls)
-
-
 def _match_exp_url(res_url: str, exp_urls: List[str]) -> Optional[str]:
     for exp in exp_urls:
         if exp in res_url:
@@ -494,10 +488,12 @@ def crawl_page(page, url, exp_resp_urls, **kwargs) -> List[Dict[str, Any]]:
     post_res_count = 0
 
     def wrapped_handler(res: Response):
+        logger.debug(f"wrapped_handler res.url: {res.url}")
+        logger.debug(f"wrapped_handler exp_resp_urls: {exp_resp_urls}")
         nonlocal profile_seen, post_res_count
-        if _is_post_response(res.url, exp_resp_urls):
+        if any(exp in res.url for exp in exp_resp_urls):
             post_res_count += 1
-        elif _is_profile_response(res.url, exp_resp_urls):
+        elif any(exp in res.url for exp in exp_resp_urls):
             profile_seen += 1
         response_handler(res, exp_resp_urls, **kwargs)
 

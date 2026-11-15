@@ -30,6 +30,7 @@ class AuthorsListHoistedState(
     var rateSavingId by mutableStateOf<Int?>(null)
     var showSearchBar by mutableStateOf(false)
     var appliedQuery by mutableStateOf<AuthorListQueryParams?>(null)
+    var openAuthorId by mutableStateOf<Int?>(null)
 
     fun replaceAuthor(updated: DyAuthorDto) {
         val i = items.indexOfFirst { it.id == updated.id }

@@ -36,6 +36,7 @@ import com.simplespider.dy.data.hostPortInputToApiBaseUrl
 import com.simplespider.dy.data.PlayerPlaylistHolder
 import com.simplespider.dy.data.TokenStore
 import com.simplespider.dy.ui.screens.AuthorDetailScreen
+import com.simplespider.dy.ui.screens.AuthorsListHoistedState
 import com.simplespider.dy.ui.screens.AuthorsScreen
 import com.simplespider.dy.ui.screens.LoginScreen
 import com.simplespider.dy.ui.screens.rememberAuthorsListHoistedState
@@ -83,6 +84,7 @@ fun AppNav(
 
     val mainVideosFeedHoist = remember { VideosFeedHoist() }
     val authorDetailVideoFeedHolder = remember { AuthorDetailVideoFeedHolder() }
+    val authorsListHoist = rememberAuthorsListHoistedState()
 
     NavHost(navController = navController, startDestination = dest) {
         composable(ROUTE_LOGIN) {
@@ -101,6 +103,7 @@ fun AppNav(
                 navController = navController,
                 tokenStore = tokenStore,
                 mainVideosFeedHoist = mainVideosFeedHoist,
+                authorsListHoist = authorsListHoist,
                 authorDetailVideoFeedHolder = authorDetailVideoFeedHolder,
                 onLoggedOut = {
                     navController.navigate(ROUTE_LOGIN) {
@@ -180,6 +183,7 @@ private fun MainTabs(
     navController: NavHostController,
     tokenStore: TokenStore,
     mainVideosFeedHoist: VideosFeedHoist,
+    authorsListHoist: AuthorsListHoistedState,
     authorDetailVideoFeedHolder: AuthorDetailVideoFeedHolder,
     onLoggedOut: () -> Unit,
 ) {
@@ -236,6 +240,7 @@ private fun MainTabs(
                 modifier = Modifier.padding(padding),
                 tokenStore = tokenStore,
                 rootNavController = navController,
+                authorsListHoist = authorsListHoist,
                 authorDetailVideoFeedHolder = authorDetailVideoFeedHolder,
             )
             1 -> VideosScreen(
@@ -262,10 +267,11 @@ private fun AuthorsTabWithNestedNav(
     modifier: Modifier = Modifier,
     tokenStore: TokenStore,
     rootNavController: NavHostController,
+    authorsListHoist: AuthorsListHoistedState,
     authorDetailVideoFeedHolder: AuthorDetailVideoFeedHolder,
 ) {
     val authorsNavController = rememberNavController()
-    val hoisted = rememberAuthorsListHoistedState()
+    val hoisted = authorsListHoist
     NavHost(
         navController = authorsNavController,
         startDestination = ROUTE_AUTHORS_LIST,
@@ -291,7 +297,10 @@ private fun AuthorsTabWithNestedNav(
                 authorId = authorId,
                 tokenStore = tokenStore,
                 videoFeedHolder = authorDetailVideoFeedHolder,
-                onBack = { authorsNavController.popBackStack() },
+                onBack = {
+                    hoisted.openAuthorId = null
+                    authorsNavController.popBackStack()
+                },
                 onAuthorUpdated = { hoisted.replaceAuthor(it) },
                 onVideoClick = { _, playlist, index, pagination ->
                     PlayerPlaylistHolder.setFromVideos(
@@ -303,6 +312,28 @@ private fun AuthorsTabWithNestedNav(
                     rootNavController.navigate(ROUTE_PLAYER)
                 },
             )
+        }
+    }
+    LaunchedEffect(authorsNavController) {
+        val openId = hoisted.openAuthorId
+        if (openId != null) {
+            authorsNavController.navigate("authors_detail/$openId") {
+                launchSingleTop = true
+            }
+        }
+        var seenDetail = false
+        authorsNavController.currentBackStackEntryFlow.collect { entry ->
+            val onDetail = entry.destination.route == ROUTE_AUTHORS_DETAIL
+            if (onDetail) {
+                seenDetail = true
+                val authorId = entry.arguments?.getInt("authorId") ?: 0
+                if (authorId != 0) {
+                    hoisted.openAuthorId = authorId
+                }
+            } else if (seenDetail && entry.destination.route == ROUTE_AUTHORS_LIST) {
+                hoisted.openAuthorId = null
+                seenDetail = false
+            }
         }
     }
 }
